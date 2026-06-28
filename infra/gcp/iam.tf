@@ -66,7 +66,7 @@ resource "google_service_account_iam_member" "github_deployer_can_act_as_runtime
 resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = "${local.app_name}-github"
   display_name              = "DevControl GitHub Actions"
-  description               = "OIDC pool for ${local.github_repo}"
+  description               = "OIDC pool for DevControl GitHub repositories"
 
   depends_on = [google_project_service.required]
 }
@@ -83,7 +83,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.ref"        = "assertion.ref"
   }
 
-  attribute_condition = "assertion.repository == '${local.github_repo}'"
+  attribute_condition = local.github_allowed_repository_condition
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
@@ -91,7 +91,9 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 }
 
 resource "google_service_account_iam_member" "github_wif_user" {
+  for_each = local.github_allowed_repositories
+
   service_account_id = google_service_account.github_deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${local.github_repo}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${each.value}"
 }

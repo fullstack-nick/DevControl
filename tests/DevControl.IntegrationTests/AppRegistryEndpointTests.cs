@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using DevControl.Application.Email;
@@ -14,10 +15,10 @@ using Xunit;
 namespace DevControl.IntegrationTests;
 
 [Collection(PostgresIntegrationCollection.Name)]
-public sealed partial class TenantSecurityEndpointTests
+public sealed partial class AppRegistryEndpointTests
 {
     [Fact]
-    public async Task OpenSignup_CreatesTenantResources_AndWritesAuditLogs()
+    public async Task AdminCanCreateToken_ViewerCannot_AndSnippetIsReturned()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -25,73 +26,37 @@ public sealed partial class TenantSecurityEndpointTests
             return;
         }
 
-        await using var factory = new DevControlStage2Factory(connectionString);
-        await factory.ResetDatabaseAsync();
-        using var client = await factory.CreateAuthenticatedClientAsync("owner@example.com");
-
-        var me = await client.GetFromJsonAsync<MeDto>("/api/auth/me");
-        Assert.NotNull(me);
-        Assert.Empty(me.Organizations);
-
-        var organization = await CreateOrganizationAsync(client, "Acme Platform");
-        var project = await PostJsonAsync<ProjectDto>(
-            client,
-            $"/api/organizations/{organization.Id}/projects",
-            new { name = "Control Plane", slug = "control-plane", description = "Stage 2 test project" });
-        _ = await PostJsonAsync<EnvironmentDto>(
-            client,
-            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments",
-            new { name = "Production", slug = "production" });
-
-        var auditLogs = await client.GetFromJsonAsync<List<AuditDto>>($"/api/organizations/{organization.Id}/audit-logs");
-
-        Assert.Contains(auditLogs!, auditLog => auditLog.Action == "organization.create");
-        Assert.Contains(auditLogs!, auditLog => auditLog.Action == "project.create");
-        Assert.Contains(auditLogs!, auditLog => auditLog.Action == "environment.create");
-    }
-
-    [Fact]
-    public async Task Rbac_InvitationAccept_AndTenantScoping_AreEnforced()
-    {
-        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
-
-        await using var factory = new DevControlStage2Factory(connectionString);
+        await using var factory = new DevControlStage3Factory(connectionString);
         await factory.ResetDatabaseAsync();
         using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
-        var organization = await CreateOrganizationAsync(ownerClient, "Secure Org");
+        var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
+
+        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
+            new { name = "Production deploys" });
+
+        Assert.StartsWith("dcr_", token.Secret, StringComparison.Ordinal);
+        Assert.Contains("devcontrol apps register", token.WorkflowSnippet, StringComparison.Ordinal);
+        Assert.Contains("--environment production", token.WorkflowSnippet, StringComparison.Ordinal);
 
         _ = await PostJsonAsync<InvitationDto>(
             ownerClient,
             $"/api/organizations/{organization.Id}/invitations",
             new { email = "viewer@example.com", role = "Viewer" });
-        var token = factory.EmailSender.LastInvitationToken();
-
         using var viewerClient = await factory.CreateAuthenticatedClientAsync("viewer@example.com");
-        var acceptResponse = await PostJsonRawAsync(viewerClient, $"/api/invitations/{token}/accept", new { });
-        Assert.Equal(HttpStatusCode.OK, acceptResponse.StatusCode);
+        var accept = await PostJsonRawAsync(viewerClient, $"/api/invitations/{factory.EmailSender.LastInvitationToken()}/accept", new { });
+        Assert.Equal(HttpStatusCode.OK, accept.StatusCode);
 
-        var forbiddenProjectResponse = await PostJsonRawAsync(
+        var denied = await PostJsonRawAsync(
             viewerClient,
-            $"/api/organizations/{organization.Id}/projects",
-            new { name = "Denied", slug = "denied", description = "" });
-        Assert.Equal(HttpStatusCode.Forbidden, forbiddenProjectResponse.StatusCode);
-
-        using var outsiderClient = await factory.CreateAuthenticatedClientAsync("outsider@example.com");
-        var outsiderOrganization = await CreateOrganizationAsync(outsiderClient, "Outsider Org");
-        var hiddenResponse = await ownerClient.GetAsync($"/api/organizations/{outsiderOrganization.Id}");
-        Assert.Equal(HttpStatusCode.NotFound, hiddenResponse.StatusCode);
-
-        var auditLogs = await ownerClient.GetFromJsonAsync<List<AuditDto>>($"/api/organizations/{organization.Id}/audit-logs");
-        Assert.Contains(auditLogs!, auditLog => auditLog.Action == "invitation.accept");
-        Assert.Contains(auditLogs!, auditLog => auditLog.Action == "project.create.denied" && auditLog.Outcome == "Denied");
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
+            new { name = "Denied" });
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
     }
 
     [Fact]
-    public async Task Invitations_CanBeResentRevoked_AndRejectMismatchedEmail()
+    public async Task RegisterApp_RequiresToken_UpsertsLiveApp_AppendsDeployment_AndHonorsRevocation()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -99,36 +64,44 @@ public sealed partial class TenantSecurityEndpointTests
             return;
         }
 
-        await using var factory = new DevControlStage2Factory(connectionString);
+        await using var factory = new DevControlStage3Factory(connectionString);
         await factory.ResetDatabaseAsync();
         using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
-        var organization = await CreateOrganizationAsync(ownerClient, "Invite Org");
-
-        var invitation = await PostJsonAsync<InvitationDto>(
+        var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
+        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
             ownerClient,
-            $"/api/organizations/{organization.Id}/invitations",
-            new { email = "developer@example.com", role = "Developer" });
-        var firstToken = factory.EmailSender.LastInvitationToken();
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
+            new { name = "Production deploys" });
 
-        using var wrongClient = await factory.CreateAuthenticatedClientAsync("wrong@example.com");
-        var wrongAccept = await PostJsonRawAsync(wrongClient, $"/api/invitations/{firstToken}/accept", new { });
-        Assert.Equal(HttpStatusCode.Forbidden, wrongAccept.StatusCode);
+        using var anonymousClient = factory.CreateClient();
+        var missingToken = await anonymousClient.PostAsJsonAsync("/api/apps/register", RegistrationPayload("v1", environment.Slug));
+        Assert.Equal(HttpStatusCode.Unauthorized, missingToken.StatusCode);
 
-        _ = await PostJsonAsync<InvitationDto>(
+        var first = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v1", environment.Slug));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+        var second = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v2", environment.Slug));
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
+            Assert.Equal(1, await dbContext.LiveApps.CountAsync());
+            Assert.Equal(2, await dbContext.LiveAppDeployments.CountAsync());
+            Assert.Contains(await dbContext.AuditLogs.ToListAsync(), auditLog => auditLog.Action == "app.register");
+            Assert.NotNull((await dbContext.RegistrationTokens.SingleAsync()).LastUsedAt);
+        }
+
+        await PostJsonAsync<object>(
             ownerClient,
-            $"/api/organizations/{organization.Id}/invitations/{invitation.Id}/resend",
+            $"/api/organizations/{organization.Id}/registration-tokens/{token.Id}/revoke",
             new { });
-        Assert.True(factory.EmailSender.Messages.Count >= 2);
-
-        var revoked = await PostJsonAsync<InvitationDto>(
-            ownerClient,
-            $"/api/organizations/{organization.Id}/invitations/{invitation.Id}/revoke",
-            new { });
-        Assert.Equal("Revoked", revoked.Status);
+        var revoked = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v3", environment.Slug));
+        Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
     }
 
     [Fact]
-    public async Task LastOwner_CannotBeRemoved()
+    public async Task RegisterApp_RejectsWrongEnvironmentForToken()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -136,23 +109,62 @@ public sealed partial class TenantSecurityEndpointTests
             return;
         }
 
-        await using var factory = new DevControlStage2Factory(connectionString);
+        await using var factory = new DevControlStage3Factory(connectionString);
         await factory.ResetDatabaseAsync();
         using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
-        var organization = await CreateOrganizationAsync(ownerClient, "Owner Guard Org");
-        var members = await ownerClient.GetFromJsonAsync<List<MemberDto>>($"/api/organizations/{organization.Id}/members");
+        var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
+        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
+            new { name = "Production deploys" });
 
-        var removeResponse = await DeleteAsync(ownerClient, $"/api/organizations/{organization.Id}/members/{members![0].Id}");
+        using var anonymousClient = factory.CreateClient();
+        var response = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v1", "staging"));
 
-        Assert.Equal(HttpStatusCode.BadRequest, removeResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
-    private static async Task<OrganizationDto> CreateOrganizationAsync(HttpClient client, string name)
+    private static object RegistrationPayload(string version, string environment)
     {
-        return await PostJsonAsync<OrganizationDto>(
+        return new
+        {
+            repo = "fullstack-nick/sample-app",
+            environment,
+            serviceUrl = "https://sample.example.com",
+            healthUrl = "https://sample.example.com/health",
+            commitSha = "abcdef1234567890",
+            version,
+            imageDigest = $"sha256:{version}",
+            capabilities = new[] { "health", "deployment-events" }
+        };
+    }
+
+    private static async Task<HttpResponseMessage> RegisterAsync(HttpClient client, string token, object payload)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/apps/register")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<(MeDto Me, OrganizationDto Organization, ProjectDto Project, EnvironmentDto Environment)> CreateTenantAsync(HttpClient client)
+    {
+        var organization = await PostJsonAsync<OrganizationDto>(
             client,
             "/api/organizations",
-            new { name, slug = "" });
+            new { name = "Acme Platform", slug = "acme-platform" });
+        var project = await PostJsonAsync<ProjectDto>(
+            client,
+            $"/api/organizations/{organization.Id}/projects",
+            new { name = "Sample App", slug = "sample-app", description = "Stage 3 sample" });
+        var environment = await PostJsonAsync<EnvironmentDto>(
+            client,
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments",
+            new { name = "Production", slug = "production" });
+        var me = await client.GetFromJsonAsync<MeDto>("/api/auth/me") ?? throw new InvalidOperationException("Missing me response.");
+        return (me, organization, project, environment);
     }
 
     private static async Task<T> PostJsonAsync<T>(HttpClient client, string path, object payload)
@@ -174,19 +186,11 @@ public sealed partial class TenantSecurityEndpointTests
         return await client.SendAsync(request);
     }
 
-    private static async Task<HttpResponseMessage> DeleteAsync(HttpClient client, string path)
-    {
-        var csrf = await client.GetFromJsonAsync<CsrfDto>("/api/auth/csrf");
-        using var request = new HttpRequestMessage(HttpMethod.Delete, path);
-        request.Headers.Add("X-CSRF-TOKEN", csrf?.Token ?? throw new InvalidOperationException("Missing CSRF token."));
-        return await client.SendAsync(request);
-    }
-
-    private sealed class DevControlStage2Factory : WebApplicationFactory<Program>
+    private sealed class DevControlStage3Factory : WebApplicationFactory<Program>
     {
         private readonly string? originalConnectionString;
 
-        public DevControlStage2Factory(string connectionString)
+        public DevControlStage3Factory(string connectionString)
         {
             originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DevControl");
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", connectionString);
@@ -302,7 +306,5 @@ public sealed partial class TenantSecurityEndpointTests
 
     private sealed record InvitationDto(Guid Id, string Email, string Role, string Status);
 
-    private sealed record MemberDto(Guid Id, Guid UserId, string Email, string DisplayName, string Role);
-
-    private sealed record AuditDto(Guid Id, string ActorEmail, string Action, string Outcome, string TargetType, string Message);
+    private sealed record RegistrationTokenCreateDto(Guid Id, string Secret, string WorkflowSnippet);
 }

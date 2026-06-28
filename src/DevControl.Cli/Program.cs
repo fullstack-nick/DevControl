@@ -1,3 +1,1 @@
-Console.WriteLine("DevControl CLI skeleton. Management commands arrive in later stages.");
-return 0;
-
+return await DevControl.Cli.CliRunner.RunAsync(args, Console.Out, Console.Error);

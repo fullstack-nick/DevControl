@@ -79,6 +79,46 @@ type ControlAction = {
   completedAt?: string;
 };
 
+type LiveApp = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  repo: string;
+  serviceUrl: string;
+  healthUrl: string;
+  currentCommitSha: string;
+  version: string;
+  imageDigest: string;
+  capabilities: string[];
+  createdAt: string;
+  lastRegisteredAt: string;
+};
+
+type RegistrationToken = {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scope: string;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+};
+
+type RegistrationTokenCreateResponse = RegistrationToken & {
+  secret: string;
+  workflowSnippet: string;
+};
+
 type MeResponse = {
   user: User;
   organizations: Organization[];
@@ -165,6 +205,10 @@ function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString() : "-";
 }
 
+function shortSha(value: string) {
+  return value.length > 12 ? value.slice(0, 12) : value;
+}
+
 function inviteTokenFromPath() {
   const match = window.location.pathname.match(/^\/invitations\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -175,12 +219,16 @@ export default function App() {
   const [authenticated, setAuthenticated] = useState<boolean | undefined>();
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentItem[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [controlActions, setControlActions] = useState<ControlAction[]>([]);
+  const [liveApps, setLiveApps] = useState<LiveApp[]>([]);
+  const [registrationTokens, setRegistrationTokens] = useState<RegistrationToken[]>([]);
+  const [createdToken, setCreatedToken] = useState<RegistrationTokenCreateResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -188,14 +236,23 @@ export default function App() {
   const [projectForm, setProjectForm] = useState({ name: "", slug: "", description: "" });
   const [environmentForm, setEnvironmentForm] = useState({ name: "", slug: "" });
   const [inviteForm, setInviteForm] = useState<{ email: string; role: Role }>({ email: "", role: "Developer" });
+  const [tokenForm, setTokenForm] = useState({ name: "" });
   const invitationToken = useMemo(inviteTokenFromPath, []);
 
   const selectedOrg = me?.organizations.find((organization) => organization.id === selectedOrgId);
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const selectedEnvironment = environments.find((environment) => environment.id === selectedEnvironmentId);
   const canManageOrg = roleAtLeast(selectedOrg?.role, "Admin");
   const canManageProjects = roleAtLeast(selectedOrg?.role, "Developer");
   const canReadAudit = roleAtLeast(selectedOrg?.role, "Admin");
   const canReadControlActions = roleAtLeast(selectedOrg?.role, "Developer");
+  const filteredLiveApps = liveApps.filter((app) => {
+    if (selectedEnvironmentId) {
+      return app.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? app.projectId === selectedProjectId : true;
+  });
 
   async function loadMe(preferredOrganizationId?: string) {
     try {
@@ -226,36 +283,49 @@ export default function App() {
       setInvitations([]);
       setAuditLogs([]);
       setControlActions([]);
+      setLiveApps([]);
+      setRegistrationTokens([]);
       return;
     }
 
     const selected = me?.organizations.find((organization) => organization.id === organizationId);
-    const [projectPayload, memberPayload, invitationPayload, auditPayload, controlActionPayload] = await Promise.all([
+    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, auditPayload, controlActionPayload] = await Promise.all([
       api<Project[]>(`/api/organizations/${organizationId}/projects`),
+      api<LiveApp[]>(`/api/organizations/${organizationId}/apps`),
       roleAtLeast(selected?.role, "Admin") ? api<Member[]>(`/api/organizations/${organizationId}/members`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<Invitation[]>(`/api/organizations/${organizationId}/invitations`) : Promise.resolve([]),
+      roleAtLeast(selected?.role, "Admin") ? api<RegistrationToken[]>(`/api/organizations/${organizationId}/registration-tokens`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<AuditLog[]>(`/api/organizations/${organizationId}/audit-logs`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Developer") ? api<ControlAction[]>(`/api/organizations/${organizationId}/control-actions`) : Promise.resolve([])
     ]);
 
     setProjects(projectPayload);
+    setLiveApps(appPayload);
     setMembers(memberPayload);
     setInvitations(invitationPayload);
+    setRegistrationTokens(tokenPayload);
     setAuditLogs(auditPayload);
     setControlActions(controlActionPayload);
     const nextProjectId = selectedProjectId && projectPayload.some((project) => project.id === selectedProjectId)
       ? selectedProjectId
       : projectPayload[0]?.id ?? "";
     setSelectedProjectId(nextProjectId);
+    setCreatedToken(undefined);
   }
 
   async function refreshEnvironments(organizationId: string, projectId: string) {
     if (!organizationId || !projectId) {
       setEnvironments([]);
+      setSelectedEnvironmentId("");
       return;
     }
 
-    setEnvironments(await api<EnvironmentItem[]>(`/api/organizations/${organizationId}/projects/${projectId}/environments`));
+    const environmentPayload = await api<EnvironmentItem[]>(`/api/organizations/${organizationId}/projects/${projectId}/environments`);
+    setEnvironments(environmentPayload);
+    const nextEnvironmentId = selectedEnvironmentId && environmentPayload.some((environment) => environment.id === selectedEnvironmentId)
+      ? selectedEnvironmentId
+      : environmentPayload[0]?.id ?? "";
+    setSelectedEnvironmentId(nextEnvironmentId);
   }
 
   useEffect(() => {
@@ -306,6 +376,7 @@ export default function App() {
       setMe(undefined);
       setSelectedOrgId("");
       setSelectedProjectId("");
+      setSelectedEnvironmentId("");
     });
   }
 
@@ -354,6 +425,38 @@ export default function App() {
       setEnvironmentForm({ name: "", slug: "" });
       await refreshEnvironments(selectedOrgId, selectedProjectId);
       setNotice("Environment created.");
+    });
+  }
+
+  async function createRegistrationToken(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const token = await api<RegistrationTokenCreateResponse>(
+        `/api/organizations/${selectedOrgId}/projects/${selectedProjectId}/environments/${selectedEnvironmentId}/registration-tokens`,
+        {
+          method: "POST",
+          body: JSON.stringify(tokenForm)
+        });
+      setTokenForm({ name: "" });
+      await refreshOrgData(selectedOrgId);
+      setCreatedToken(token);
+      setNotice("Registration token created. Copy it now; it will not be shown again.");
+    });
+  }
+
+  async function revokeRegistrationToken(token: RegistrationToken) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api(`/api/organizations/${selectedOrgId}/registration-tokens/${token.id}/revoke`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setNotice("Registration token revoked.");
     });
   }
 
@@ -504,7 +607,7 @@ export default function App() {
             </label>
             <label>
               Environment
-              <select disabled={environments.length === 0}>
+              <select value={selectedEnvironmentId} onChange={(event) => setSelectedEnvironmentId(event.target.value)} disabled={environments.length === 0}>
                 {environments.length === 0 ? <option>No environments</option> : null}
                 {environments.map((environment) => (
                   <option key={environment.id} value={environment.id}>{environment.name}</option>
@@ -560,6 +663,69 @@ export default function App() {
                 </form>
               )}
             </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Live apps</h2>
+                <span>{filteredLiveApps.length}</span>
+              </div>
+              <div className="stack">
+                {filteredLiveApps.length === 0 ? <p className="empty">No live apps registered</p> : null}
+                {filteredLiveApps.map((app) => (
+                  <div className="list-item app-item" key={app.id}>
+                    <div>
+                      <strong>{app.repo}</strong>
+                      <span>{app.projectName} / {app.environmentName}</span>
+                      <span>{app.version} / {shortSha(app.currentCommitSha)}</span>
+                      <span>{app.imageDigest}</span>
+                      <span>{app.capabilities.join(", ")}</span>
+                      <span>Registered {formatDate(app.lastRegisteredAt)}</span>
+                    </div>
+                    <div className="actions">
+                      <a href={app.serviceUrl} target="_blank" rel="noreferrer">Service</a>
+                      <a href={app.healthUrl} target="_blank" rel="noreferrer">Health</a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {canManageOrg && (
+              <div className="panel wide">
+                <div className="panel-heading">
+                  <h2>Registration tokens</h2>
+                  <span>{registrationTokens.length}</span>
+                </div>
+                {createdToken && (
+                  <div className="secret-box">
+                    <strong>Copy this token now</strong>
+                    <code>{createdToken.secret}</code>
+                    <pre>{createdToken.workflowSnippet}</pre>
+                  </div>
+                )}
+                <div className="table">
+                  {registrationTokens.length === 0 ? <p className="empty">No registration tokens</p> : null}
+                  {registrationTokens.map((token) => (
+                    <div className="table-row token-row" key={token.id}>
+                      <div>
+                        <strong>{token.name}</strong>
+                        <span>{token.projectName} / {token.environmentName}</span>
+                        <span>{token.tokenPrefix}... / {token.scope}</span>
+                        <span>Last used {formatDate(token.lastUsedAt)}</span>
+                      </div>
+                      <span>{token.revokedAt ? "Revoked" : "Active"}</span>
+                      <button onClick={() => revokeRegistrationToken(token)} disabled={busy || Boolean(token.revokedAt)}>Revoke</button>
+                    </div>
+                  ))}
+                </div>
+                {selectedEnvironment && (
+                  <form className="inline-form token-form" onSubmit={createRegistrationToken}>
+                    <input placeholder={`Name for ${selectedEnvironment.name}`} value={tokenForm.name} onChange={(event) => setTokenForm({ name: event.target.value })} />
+                    <button className="primary" disabled={busy}>Create token</button>
+                  </form>
+                )}
+              </div>
+            )}
 
             {canManageOrg && (
               <div className="panel wide">

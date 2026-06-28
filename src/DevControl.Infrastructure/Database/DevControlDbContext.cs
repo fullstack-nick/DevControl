@@ -27,6 +27,12 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
 
     public DbSet<ControlAction> ControlActions => Set<ControlAction>();
 
+    public DbSet<LiveApp> LiveApps => Set<LiveApp>();
+
+    public DbSet<LiveAppDeployment> LiveAppDeployments => Set<LiveAppDeployment>();
+
+    public DbSet<RegistrationToken> RegistrationTokens => Set<RegistrationToken>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -40,6 +46,9 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
         ConfigureProjectEnvironment(modelBuilder);
         ConfigureAuditLog(modelBuilder);
         ConfigureControlAction(modelBuilder);
+        ConfigureLiveApp(modelBuilder);
+        ConfigureLiveAppDeployment(modelBuilder);
+        ConfigureRegistrationToken(modelBuilder);
         ConfigureDataProtectionKey(modelBuilder);
     }
 
@@ -368,6 +377,150 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(controlAction => controlAction.RequestedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureLiveApp(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<LiveApp>(entity =>
+        {
+            entity.ToTable("live_apps");
+            entity.HasKey(liveApp => liveApp.Id);
+
+            entity.Property(liveApp => liveApp.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(liveApp => liveApp.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(liveApp => liveApp.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(liveApp => liveApp.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(liveApp => liveApp.Repo).HasColumnName("repo").HasMaxLength(220).IsRequired();
+            entity.Property(liveApp => liveApp.NormalizedRepo).HasColumnName("normalized_repo").HasMaxLength(220).IsRequired();
+            entity.Property(liveApp => liveApp.ServiceUrl).HasColumnName("service_url").HasMaxLength(1000).IsRequired();
+            entity.Property(liveApp => liveApp.HealthUrl).HasColumnName("health_url").HasMaxLength(1000).IsRequired();
+            entity.Property(liveApp => liveApp.CurrentCommitSha).HasColumnName("current_commit_sha").HasMaxLength(64).IsRequired();
+            entity.Property(liveApp => liveApp.Version).HasColumnName("version").HasMaxLength(120).IsRequired();
+            entity.Property(liveApp => liveApp.ImageDigest).HasColumnName("image_digest").HasMaxLength(400).IsRequired();
+            entity.Property(liveApp => liveApp.CapabilitiesJson).HasColumnName("capabilities_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(liveApp => liveApp.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(liveApp => liveApp.LastRegisteredAt).HasColumnName("last_registered_at").IsRequired();
+
+            entity.HasIndex(liveApp => liveApp.OrganizationId);
+            entity.HasIndex(liveApp => liveApp.ProjectId);
+            entity.HasIndex(liveApp => liveApp.EnvironmentId);
+            entity.HasIndex(liveApp => new { liveApp.OrganizationId, liveApp.ProjectId, liveApp.EnvironmentId, liveApp.NormalizedRepo }).IsUnique();
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(liveApp => liveApp.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(liveApp => liveApp.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(liveApp => liveApp.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureLiveAppDeployment(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<LiveAppDeployment>(entity =>
+        {
+            entity.ToTable("live_app_deployments");
+            entity.HasKey(deployment => deployment.Id);
+
+            entity.Property(deployment => deployment.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(deployment => deployment.LiveAppId).HasColumnName("live_app_id").IsRequired();
+            entity.Property(deployment => deployment.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(deployment => deployment.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(deployment => deployment.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(deployment => deployment.Repo).HasColumnName("repo").HasMaxLength(220).IsRequired();
+            entity.Property(deployment => deployment.ServiceUrl).HasColumnName("service_url").HasMaxLength(1000).IsRequired();
+            entity.Property(deployment => deployment.HealthUrl).HasColumnName("health_url").HasMaxLength(1000).IsRequired();
+            entity.Property(deployment => deployment.CommitSha).HasColumnName("commit_sha").HasMaxLength(64).IsRequired();
+            entity.Property(deployment => deployment.Version).HasColumnName("version").HasMaxLength(120).IsRequired();
+            entity.Property(deployment => deployment.ImageDigest).HasColumnName("image_digest").HasMaxLength(400).IsRequired();
+            entity.Property(deployment => deployment.CapabilitiesJson).HasColumnName("capabilities_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(deployment => deployment.RegisteredAt).HasColumnName("registered_at").IsRequired();
+
+            entity.HasIndex(deployment => new { deployment.LiveAppId, deployment.RegisteredAt });
+            entity.HasIndex(deployment => new { deployment.OrganizationId, deployment.RegisteredAt });
+
+            entity.HasOne<LiveApp>()
+                .WithMany()
+                .HasForeignKey(deployment => deployment.LiveAppId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(deployment => deployment.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(deployment => deployment.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(deployment => deployment.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureRegistrationToken(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RegistrationToken>(entity =>
+        {
+            entity.ToTable("registration_tokens");
+            entity.HasKey(token => token.Id);
+
+            entity.Property(token => token.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(token => token.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(token => token.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(token => token.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(token => token.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(token => token.TokenPrefix).HasColumnName("token_prefix").HasMaxLength(32).IsRequired();
+            entity.Property(token => token.TokenHash).HasColumnName("token_hash").HasMaxLength(64).IsRequired();
+            entity.Property(token => token.Scope).HasColumnName("scope").HasMaxLength(80).IsRequired();
+            entity.Property(token => token.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(token => token.RevokedByUserId).HasColumnName("revoked_by_user_id");
+            entity.Property(token => token.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(token => token.LastUsedAt).HasColumnName("last_used_at");
+            entity.Property(token => token.RevokedAt).HasColumnName("revoked_at");
+
+            entity.HasIndex(token => token.OrganizationId);
+            entity.HasIndex(token => token.ProjectId);
+            entity.HasIndex(token => token.EnvironmentId);
+            entity.HasIndex(token => token.TokenHash).IsUnique();
+            entity.HasIndex(token => new { token.OrganizationId, token.ProjectId, token.EnvironmentId, token.CreatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(token => token.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(token => token.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(token => token.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(token => token.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(token => token.RevokedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

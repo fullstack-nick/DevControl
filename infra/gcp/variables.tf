@@ -41,6 +41,12 @@ variable "github_repo" {
   type        = string
 }
 
+variable "github_allowed_repositories" {
+  description = "Explicit GitHub repositories allowed to impersonate the deployer service account through Workload Identity Federation."
+  type        = list(string)
+  default     = []
+}
+
 variable "subnet_cidr" {
   description = "Primary private subnet CIDR for Cloud Run direct VPC egress and PostgreSQL."
   type        = string

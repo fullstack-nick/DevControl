@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DevControl.Application\DevControl.Application.csproj" />
+    <ProjectReference Include="..\..\src\DevControl.Cli\DevControl.Cli.csproj" />
     <ProjectReference Include="..\..\src\DevControl.Infrastructure\DevControl.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

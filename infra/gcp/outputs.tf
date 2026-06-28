@@ -43,3 +43,6 @@ output "github_deployer_service_account" {
   value = google_service_account.github_deployer.email
 }
 
+output "github_allowed_repositories" {
+  value = sort(tolist(local.github_allowed_repositories))
+}

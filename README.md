@@ -63,6 +63,13 @@ organizations, projects, environments, members, invitations, RBAC, audit logs,
 and the base control action model. See
 [docs/stage-2-tenant-security.md](docs/stage-2-tenant-security.md).
 
+## Stage 3 Live App Registry
+
+Stage 3 adds scoped registration tokens, `devcontrol apps register`, generated
+GitHub Actions snippets, and the live app registry. Existing app repos still own
+their deployments; DevControl records post-deploy runtime facts. See
+[docs/stage-3-live-app-registry.md](docs/stage-3-live-app-registry.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,
