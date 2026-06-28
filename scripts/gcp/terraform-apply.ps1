@@ -17,15 +17,24 @@ if ([string]::IsNullOrWhiteSpace($GithubOwner) -or [string]::IsNullOrWhiteSpace(
 
 & "$PSScriptRoot\assert-gcp-account.ps1" -RequiredAccount $RequiredAccount
 
+function Assert-LastExitCode {
+  param([string]$Operation)
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Operation failed with exit code $LASTEXITCODE."
+  }
+}
+
 Push-Location "$PSScriptRoot\..\..\infra\gcp"
 try {
   terraform init
+  Assert-LastExitCode "terraform init"
   terraform apply `
     -var "project_id=$ProjectId" `
     -var "github_owner=$GithubOwner" `
     -var "github_repo=$GithubRepo" `
     -var "operator_google_account=$RequiredAccount"
+  Assert-LastExitCode "terraform apply"
 } finally {
   Pop-Location
 }
-

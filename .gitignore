@@ -22,6 +22,7 @@ crash.*.log
 .env
 .env.*
 !.env.example
+.devcontrol-gcp-project-id
 
 *.user
 *.suo
