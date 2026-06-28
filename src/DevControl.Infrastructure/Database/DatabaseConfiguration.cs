@@ -35,6 +35,7 @@ public static class DatabaseConfiguration
             Username = username,
             Password = password,
             Port = int.TryParse(portText, out var port) ? port : 5432,
+            GssEncryptionMode = GssEncryptionMode.Disable,
             IncludeErrorDetail = false,
             Pooling = true
         };
@@ -42,4 +43,3 @@ public static class DatabaseConfiguration
         return builder.ConnectionString;
     }
 }
-

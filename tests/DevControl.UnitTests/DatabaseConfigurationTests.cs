@@ -41,6 +41,7 @@ public sealed class DatabaseConfigurationTests
         Assert.Contains("Host=postgres", connectionString);
         Assert.Contains("Port=5433", connectionString);
         Assert.Contains("Username=devcontrol", connectionString);
+        Assert.Contains("GSS Encryption Mode=Disable", connectionString);
     }
 
     [Fact]
