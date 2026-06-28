@@ -1,6 +1,4 @@
 using System;
-using DevControl.Infrastructure.Database;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -8,8 +6,6 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace DevControl.Infrastructure.Migrations;
 
-[DbContext(typeof(DevControlDbContext))]
-[Migration("20260628000000_InitialCreate")]
 public partial class InitialCreate : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

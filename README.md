@@ -56,6 +56,13 @@ dotnet test DevControl.sln --configuration Release
 The integration test for `/health/ready` runs only when
 `DEVCONTROL_TEST_CONNECTION_STRING` is set.
 
+## Stage 2 Tenant/Security
+
+Stage 2 adds Google-backed user sign-in, local development sign-in,
+organizations, projects, environments, members, invitations, RBAC, audit logs,
+and the base control action model. See
+[docs/stage-2-tenant-security.md](docs/stage-2-tenant-security.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,
@@ -69,4 +76,3 @@ Free-tier defaults:
 - Boot disk: 10 GB `pd-standard`
 - PostgreSQL data disk: 20 GB `pd-standard`, not auto-deleted
 - Cloud Run: `min-instances=0`, `max-instances=1`
-

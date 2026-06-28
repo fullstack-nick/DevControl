@@ -31,6 +31,20 @@ resource "google_secret_manager_secret_iam_member" "vm_can_read_postgres_passwor
   member    = "serviceAccount:${google_service_account.postgres_vm.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "runtime_can_read_google_oauth_client_secret" {
+  count     = var.auth_google_client_secret == "" ? 0 : 1
+  secret_id = google_secret_manager_secret.google_oauth_client_secret[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "runtime_can_read_smtp_password" {
+  count     = var.smtp_password == "" ? 0 : 1
+  secret_id = google_secret_manager_secret.smtp_password[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 resource "google_project_iam_member" "github_deployer_run_admin" {
   project = var.project_id
   role    = "roles/run.admin"

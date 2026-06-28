@@ -70,6 +70,88 @@ resource "google_cloud_run_v2_service" "devcontrol" {
         }
       }
 
+      env {
+        name  = "DEVCONTROL_EMAIL_MODE"
+        value = var.email_mode
+      }
+
+      env {
+        name  = "DEVCONTROL_EMAIL_FROM_ADDRESS"
+        value = var.email_from_address
+      }
+
+      env {
+        name  = "DEVCONTROL_EMAIL_FROM_NAME"
+        value = var.email_from_name
+      }
+
+      env {
+        name  = "DEVCONTROL_SMTP_PORT"
+        value = tostring(var.smtp_port)
+      }
+
+      env {
+        name  = "DEVCONTROL_SMTP_USE_STARTTLS"
+        value = tostring(var.smtp_use_starttls)
+      }
+
+      dynamic "env" {
+        for_each = var.auth_google_client_id == "" ? [] : [var.auth_google_client_id]
+
+        content {
+          name  = "DEVCONTROL_AUTH_GOOGLE_CLIENT_ID"
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.auth_google_client_secret == "" ? [] : [1]
+
+        content {
+          name = "DEVCONTROL_AUTH_GOOGLE_CLIENT_SECRET"
+
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.google_oauth_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.smtp_host == "" ? [] : [var.smtp_host]
+
+        content {
+          name  = "DEVCONTROL_SMTP_HOST"
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.smtp_username == "" ? [] : [var.smtp_username]
+
+        content {
+          name  = "DEVCONTROL_SMTP_USERNAME"
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.smtp_password == "" ? [] : [1]
+
+        content {
+          name = "DEVCONTROL_SMTP_PASSWORD"
+
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.smtp_password[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       resources {
         limits = {
           cpu    = "1"
@@ -84,7 +166,9 @@ resource "google_cloud_run_v2_service" "devcontrol" {
 
   depends_on = [
     google_compute_instance.postgres,
-    google_secret_manager_secret_iam_member.runtime_can_read_postgres_password
+    google_secret_manager_secret_iam_member.runtime_can_read_postgres_password,
+    google_secret_manager_secret_iam_member.runtime_can_read_google_oauth_client_secret,
+    google_secret_manager_secret_iam_member.runtime_can_read_smtp_password
   ]
 
   lifecycle {

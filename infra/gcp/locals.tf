@@ -5,7 +5,7 @@ locals {
 
   labels = {
     app      = local.app_name
-    stage    = "stage-1"
+    stage    = "stage-2"
     operator = local.operator_label
   }
 
@@ -21,4 +21,3 @@ locals {
     "sts.googleapis.com"
   ])
 }
-

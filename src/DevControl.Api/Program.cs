@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using DevControl.Api.Endpoints;
+using DevControl.Api.Security;
 using DevControl.Application.Health;
 using DevControl.Infrastructure.Database;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,8 +18,14 @@ builder.Logging.AddJsonConsole(options =>
 });
 
 builder.Services.AddDevControlInfrastructure(builder.Configuration);
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<DevControlDbContext>()
+    .SetApplicationName("DevControl");
+builder.Services.AddDevControlSecurity(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 app.Use(async (context, next) =>
 {
@@ -58,6 +67,9 @@ if (IsStartupMigrationEnabled())
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAntiforgery();
 
 app.MapGet("/health/live", () => Results.Ok(HealthPayload.Live()));
 
@@ -86,6 +98,9 @@ app.MapGet("/health/ready", async (
     }
 });
 
+app.MapAuthEndpoints();
+app.MapTenantEndpoints();
+
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
@@ -99,4 +114,3 @@ static bool IsStartupMigrationEnabled()
 public partial class Program
 {
 }
-

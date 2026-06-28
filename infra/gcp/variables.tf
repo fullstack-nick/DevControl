@@ -71,3 +71,69 @@ variable "initial_cloud_run_image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
+variable "auth_google_client_id" {
+  description = "Google OAuth/OIDC client ID for DevControl user sign-in. Leave empty until production auth is configured."
+  type        = string
+  default     = ""
+}
+
+variable "auth_google_client_secret" {
+  description = "Google OAuth/OIDC client secret. Leave empty until production auth is configured."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "email_mode" {
+  description = "Email delivery mode for invitation mail."
+  type        = string
+  default     = "log"
+
+  validation {
+    condition     = contains(["log", "smtp"], var.email_mode)
+    error_message = "email_mode must be log or smtp."
+  }
+}
+
+variable "email_from_address" {
+  description = "From address for DevControl invitation email."
+  type        = string
+  default     = "devcontrol@localhost"
+}
+
+variable "email_from_name" {
+  description = "From display name for DevControl invitation email."
+  type        = string
+  default     = "DevControl"
+}
+
+variable "smtp_host" {
+  description = "SMTP host for invitation email when email_mode is smtp."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  description = "SMTP port for invitation email when email_mode is smtp."
+  type        = number
+  default     = 587
+}
+
+variable "smtp_username" {
+  description = "SMTP username for invitation email when email_mode is smtp."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_password" {
+  description = "SMTP password for invitation email when email_mode is smtp."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "smtp_use_starttls" {
+  description = "Whether SMTP delivery should use TLS."
+  type        = bool
+  default     = true
+}

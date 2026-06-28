@@ -5,6 +5,7 @@ using Xunit;
 
 namespace DevControl.IntegrationTests;
 
+[Collection(PostgresIntegrationCollection.Name)]
 public sealed class HealthEndpointTests
 {
     [Fact]

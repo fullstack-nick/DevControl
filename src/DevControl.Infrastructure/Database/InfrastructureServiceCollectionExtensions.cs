@@ -1,3 +1,5 @@
+using DevControl.Application.Email;
+using DevControl.Infrastructure.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +19,15 @@ public static class InfrastructureServiceCollectionExtensions
             options.UseNpgsql(connectionString);
         });
 
+        var emailConfiguration = EmailConfiguration.FromConfiguration(configuration);
+        services.AddSingleton(emailConfiguration);
+        services.AddSingleton<IEmailSender>(serviceProvider =>
+        {
+            return string.Equals(emailConfiguration.Mode, "smtp", StringComparison.OrdinalIgnoreCase)
+                ? ActivatorUtilities.CreateInstance<SmtpEmailSender>(serviceProvider)
+                : ActivatorUtilities.CreateInstance<LoggingEmailSender>(serviceProvider);
+        });
+
         return services;
     }
 }
-
