@@ -86,6 +86,18 @@ resource "google_cloud_run_v2_service" "devcontrol" {
     google_compute_instance.postgres,
     google_secret_manager_secret_iam_member.runtime_can_read_postgres_password
   ]
+
+  lifecycle {
+    ignore_changes = [
+      client,
+      client_version,
+      labels["commit-sha"],
+      labels["managed-by"],
+      scaling,
+      template[0].labels,
+      template[0].containers[0].image
+    ]
+  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
@@ -95,4 +107,3 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
-
