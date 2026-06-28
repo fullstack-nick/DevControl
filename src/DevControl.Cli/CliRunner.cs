@@ -31,11 +31,11 @@ public sealed class CliRunner
         this.environment = environment ?? Environment.GetEnvironmentVariable;
     }
 
-    public static Task<int> RunAsync(string[] args, TextWriter output, TextWriter error)
+    public static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error)
     {
         using var httpClient = new HttpClient();
         var runner = new CliRunner(httpClient, new CliConfigurationStore(), output, error);
-        return runner.RunAsync(args);
+        return await runner.RunAsync(args);
     }
 
     public async Task<int> RunAsync(string[] args)
