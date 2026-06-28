@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y postgresql postgresql-contrib jq rsync
+
+TOKEN="$(curl -fsS -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" | jq -r '.access_token')"
+
+DB_PASSWORD="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/${postgres_password_secret}/versions/latest:access" | jq -r '.payload.data' | base64 --decode)"
+
+DATA_DISK="/dev/disk/by-id/google-postgres-data"
+DATA_ROOT="/var/lib/postgresql-data"
+
+until [ -b "$DATA_DISK" ]; do
+  sleep 2
+done
+
+if ! blkid "$DATA_DISK" >/dev/null 2>&1; then
+  mkfs.ext4 -F "$DATA_DISK"
+fi
+
+mkdir -p "$DATA_ROOT"
+if ! mountpoint -q "$DATA_ROOT"; then
+  mount "$DATA_DISK" "$DATA_ROOT"
+fi
+
+if ! grep -q "$DATA_ROOT" /etc/fstab; then
+  echo "$DATA_DISK $DATA_ROOT ext4 defaults,nofail 0 2" >> /etc/fstab
+fi
+
+PG_VERSION="$(ls /etc/postgresql | sort -V | tail -n 1)"
+systemctl stop postgresql
+
+mkdir -p "$DATA_ROOT/$PG_VERSION"
+chown -R postgres:postgres "$DATA_ROOT"
+
+if [ ! -d "$DATA_ROOT/$PG_VERSION/main" ]; then
+  rsync -a "/var/lib/postgresql/$PG_VERSION/main" "$DATA_ROOT/$PG_VERSION/"
+  chown -R postgres:postgres "$DATA_ROOT/$PG_VERSION/main"
+fi
+
+sed -i "s|^data_directory = .*|data_directory = '$DATA_ROOT/$PG_VERSION/main'|" "/etc/postgresql/$PG_VERSION/main/postgresql.conf"
+sed -i "s/^#listen_addresses = .*/listen_addresses = '${postgres_private_ip}'/" "/etc/postgresql/$PG_VERSION/main/postgresql.conf"
+
+if ! grep -q "${subnet_cidr}" "/etc/postgresql/$PG_VERSION/main/pg_hba.conf"; then
+  echo "host all all ${subnet_cidr} scram-sha-256" >> "/etc/postgresql/$PG_VERSION/main/pg_hba.conf"
+fi
+
+systemctl start postgresql
+
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${postgres_username}'" | grep -q 1 || \
+  sudo -u postgres psql -c "CREATE ROLE ${postgres_username} LOGIN PASSWORD '$DB_PASSWORD';"
+
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${postgres_database}'" | grep -q 1 || \
+  sudo -u postgres createdb --owner="${postgres_username}" "${postgres_database}"
+
+sudo -u postgres psql -d "${postgres_database}" -c "GRANT ALL PRIVILEGES ON DATABASE ${postgres_database} TO ${postgres_username};"
+
+systemctl restart postgresql

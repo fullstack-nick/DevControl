@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevControl.Application\DevControl.Application.csproj" />
+    <ProjectReference Include="..\DevControl.Domain\DevControl.Domain.csproj" />
+    <ProjectReference Include="..\DevControl.Infrastructure\DevControl.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
+

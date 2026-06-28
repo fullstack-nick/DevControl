@@ -1,0 +1,72 @@
+# DevControl
+
+DevControl is a developer operations control plane for live apps. Stage 1 proves
+the deployable skeleton: combined .NET API and React UI, PostgreSQL, Docker
+Compose, Terraform-managed GCP infrastructure, Cloud Run, and GitHub Actions.
+
+## GCP Account Requirement
+
+All human GCP changes for this project must use:
+
+```text
+nickaccturk@gmail.com
+```
+
+The project scripts fail closed if `gcloud` is authenticated as any other
+account. See [docs/gcp-account-policy.md](docs/gcp-account-policy.md).
+
+## Local Development
+
+Prerequisites:
+
+- .NET SDK 10
+- Node.js 22
+- Docker
+
+Run the full local stack:
+
+```powershell
+docker compose up --build
+```
+
+Then open:
+
+```text
+http://localhost:8080
+http://localhost:8080/health/live
+http://localhost:8080/health/ready
+```
+
+The app runs EF Core migrations on startup in Compose through:
+
+```text
+DEVCONTROL_RUN_MIGRATIONS_ON_STARTUP=true
+```
+
+## Tests
+
+```powershell
+npm ci --prefix src/DevControl.Web
+npm run build --prefix src/DevControl.Web
+dotnet restore DevControl.sln
+dotnet build DevControl.sln --configuration Release
+dotnet test DevControl.sln --configuration Release
+```
+
+The integration test for `/health/ready` runs only when
+`DEVCONTROL_TEST_CONNECTION_STRING` is set.
+
+## GCP Stage 1
+
+Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,
+Terraform, GitHub WIF, and Cloud Run deployment.
+
+Free-tier defaults:
+
+- Region: `us-central1`
+- Zone: `us-central1-a`
+- PostgreSQL VM: `e2-micro`
+- Boot disk: 10 GB `pd-standard`
+- PostgreSQL data disk: 20 GB `pd-standard`, not auto-deleted
+- Cloud Run: `min-instances=0`, `max-instances=1`
+

@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-test-image:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: devcontrol_tests
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d devcontrol_tests"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DEVCONTROL_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=devcontrol_tests;Username=postgres;Password=postgres
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/DevControl.Web/package-lock.json
+
+      - name: Install React dependencies
+        run: npm ci
+        working-directory: src/DevControl.Web
+
+      - name: Build React app
+        run: npm run build
+        working-directory: src/DevControl.Web
+
+      - name: Restore .NET
+        run: dotnet restore DevControl.sln
+
+      - name: Build .NET
+        run: dotnet build DevControl.sln --configuration Release --no-restore
+
+      - name: Test .NET
+        run: dotnet test DevControl.sln --configuration Release --no-build --logger trx
+
+      - name: Build Docker image
+        run: docker build -t devcontrol:ci .
+

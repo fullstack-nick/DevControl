@@ -1,0 +1,17 @@
+.git
+.github
+.terraform
+**/.terraform
+**/terraform.tfstate*
+**/*.tfvars
+**/*.tfvars.json
+**/bin
+**/obj
+**/node_modules
+**/dist
+TestResults
+coverage
+.env
+.env.*
+README.md
+
