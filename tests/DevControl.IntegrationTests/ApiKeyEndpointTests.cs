@@ -157,7 +157,8 @@ public sealed partial class ApiKeyEndpointTests
         var apiKeySecretService = scope.ServiceProvider.GetRequiredService<ApiKeySecretService>();
         var now = DateTimeOffset.UtcNow;
         var secret = apiKeySecretService.CreateKey();
-        var owner = await dbContext.Users.SingleAsync(user => user.NormalizedEmail == "owner@example.com");
+        var normalizedOwnerEmail = EmailAddressNormalizer.Normalize("owner@example.com");
+        var owner = await dbContext.Users.SingleAsync(user => user.NormalizedEmail == normalizedOwnerEmail);
         dbContext.ApiKeys.Add(new ApiKey(
             organizationId,
             projectId,
