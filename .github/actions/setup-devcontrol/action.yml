@@ -25,8 +25,9 @@ runs:
         set -euo pipefail
         package_dir="$RUNNER_TEMP/devcontrol-tool"
         tool_dir="$RUNNER_TEMP/devcontrol-bin"
+        repo_root="$(cd "${{ github.action_path }}/../../.." && pwd)"
         mkdir -p "$package_dir" "$tool_dir"
-        dotnet pack "${{ github.action_path }}/src/DevControl.Cli/DevControl.Cli.csproj" \
+        dotnet pack "$repo_root/src/DevControl.Cli/DevControl.Cli.csproj" \
           --configuration "${{ inputs.configuration }}" \
           --output "$package_dir"
         dotnet tool install \
