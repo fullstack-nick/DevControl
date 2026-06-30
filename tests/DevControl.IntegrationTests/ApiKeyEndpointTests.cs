@@ -4,6 +4,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using DevControl.Application.Email;
+using DevControl.Application.Security;
+using DevControl.Domain.Entities;
 using DevControl.Infrastructure.Database;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -15,10 +17,10 @@ using Xunit;
 namespace DevControl.IntegrationTests;
 
 [Collection(PostgresIntegrationCollection.Name)]
-public sealed partial class AppRegistryEndpointTests
+public sealed partial class ApiKeyEndpointTests
 {
     [Fact]
-    public async Task AdminCanCreateToken_ViewerCannot_AndSnippetIsReturned()
+    public async Task AdminCanCreateRevokeRotateKeys_DeveloperCannotMutate_AndSecretsAreShownOnce()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -26,82 +28,60 @@ public sealed partial class AppRegistryEndpointTests
             return;
         }
 
-        await using var factory = new DevControlStage3Factory(connectionString);
+        await using var factory = new DevControlStage4Factory(connectionString);
         await factory.ResetDatabaseAsync();
         using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
         var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
 
-        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
-            ownerClient,
-            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
-            new { name = "Production deploys" });
+        var apiKey = await CreateApiKeyAsync(ownerClient, organization.Id, project.Id, environment.Id, "Runtime demo", 10);
+        Assert.StartsWith("dck_", apiKey.Secret, StringComparison.Ordinal);
+        Assert.Equal("sample:read", Assert.Single(apiKey.Scopes));
 
-        Assert.StartsWith("dcr_", token.Secret, StringComparison.Ordinal);
-        Assert.Contains("devcontrol apps register", token.WorkflowSnippet, StringComparison.Ordinal);
-        Assert.Contains("--environment production", token.WorkflowSnippet, StringComparison.Ordinal);
+        var listResponse = await ownerClient.GetAsync($"/api/organizations/{organization.Id}/api-keys");
+        listResponse.EnsureSuccessStatusCode();
+        var listBody = await listResponse.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(apiKey.Secret, listBody, StringComparison.Ordinal);
+        Assert.Contains(apiKey.KeyPrefix, listBody, StringComparison.Ordinal);
 
         _ = await PostJsonAsync<InvitationDto>(
             ownerClient,
             $"/api/organizations/{organization.Id}/invitations",
-            new { email = "viewer@example.com", role = "Viewer" });
-        using var viewerClient = await factory.CreateAuthenticatedClientAsync("viewer@example.com");
-        var accept = await PostJsonRawAsync(viewerClient, $"/api/invitations/{factory.EmailSender.LastInvitationToken()}/accept", new { });
+            new { email = "developer@example.com", role = "Developer" });
+        using var developerClient = await factory.CreateAuthenticatedClientAsync("developer@example.com");
+        var accept = await PostJsonRawAsync(developerClient, $"/api/invitations/{factory.EmailSender.LastInvitationToken()}/accept", new { });
         Assert.Equal(HttpStatusCode.OK, accept.StatusCode);
 
         var denied = await PostJsonRawAsync(
-            viewerClient,
-            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
-            new { name = "Denied" });
+            developerClient,
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/api-keys",
+            new { name = "Denied", scopes = new[] { "sample:read" } });
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-    }
 
-    [Fact]
-    public async Task RegisterApp_RequiresToken_UpsertsLiveApp_AppendsDeployment_AndHonorsRevocation()
-    {
-        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
-
-        await using var factory = new DevControlStage3Factory(connectionString);
-        await factory.ResetDatabaseAsync();
-        using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
-        var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
-        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
+        var revoke = await PostJsonAsync<ApiKeyRevokeDto>(
             ownerClient,
-            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
-            new { name = "Production deploys" });
-
-        using var anonymousClient = factory.CreateClient();
-        var missingToken = await anonymousClient.PostAsJsonAsync("/api/apps/register", RegistrationPayload("v1", environment.Slug));
-        Assert.Equal(HttpStatusCode.Unauthorized, missingToken.StatusCode);
-
-        var first = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v1", environment.Slug));
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-
-        var second = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v2", environment.Slug));
-        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-
-        await using (var scope = factory.Services.CreateAsyncScope())
-        {
-            var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
-            Assert.Equal(1, await dbContext.LiveApps.CountAsync());
-            Assert.Equal(2, await dbContext.LiveAppDeployments.CountAsync());
-            Assert.Contains(await dbContext.AuditLogs.ToListAsync(), auditLog => auditLog.Action == "app.register");
-            Assert.NotNull((await dbContext.RegistrationTokens.SingleAsync()).LastUsedAt);
-        }
-
-        await PostJsonAsync<object>(
-            ownerClient,
-            $"/api/organizations/{organization.Id}/registration-tokens/{token.Id}/revoke",
+            $"/api/organizations/{organization.Id}/api-keys/{apiKey.Id}/revoke",
             new { });
-        var revoked = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v3", environment.Slug));
-        Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
+        Assert.NotNull(revoke.RevokedAt);
+
+        var activeForRotation = await CreateApiKeyAsync(ownerClient, organization.Id, project.Id, environment.Id, "Rotate me", 10);
+        var rotated = await PostJsonAsync<ApiKeyCreateDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/api-keys/{activeForRotation.Id}/rotate",
+            new { });
+
+        Assert.StartsWith("dck_", rotated.Secret, StringComparison.Ordinal);
+        Assert.NotEqual(activeForRotation.Secret, rotated.Secret);
+        Assert.Equal(activeForRotation.Id, rotated.RotatedFromApiKeyId);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
+        Assert.Contains(await dbContext.ControlActions.ToListAsync(), action => action.ActionType == "api_key.revoke");
+        Assert.Contains(await dbContext.ControlActions.ToListAsync(), action => action.ActionType == "api_key.rotate");
+        Assert.Contains(await dbContext.AuditLogs.ToListAsync(), auditLog => auditLog.Action == "api_key.create");
     }
 
     [Fact]
-    public async Task RegisterApp_RejectsWrongEnvironmentForToken()
+    public async Task RuntimeEndpoint_MetersSuccessFailureWrongScopeRevocationAndRateLimit()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -109,43 +89,94 @@ public sealed partial class AppRegistryEndpointTests
             return;
         }
 
-        await using var factory = new DevControlStage3Factory(connectionString);
+        await using var factory = new DevControlStage4Factory(connectionString);
         await factory.ResetDatabaseAsync();
         using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
         var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
-        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
+        var apiKey = await CreateApiKeyAsync(ownerClient, organization.Id, project.Id, environment.Id, "Metered", 2);
+
+        using var runtimeClient = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await runtimeClient.GetAsync("/api/runtime/sample/echo")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SendRuntimeAsync(runtimeClient, "dck_bad", "/api/runtime/sample/echo")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await SendRuntimeAsync(runtimeClient, apiKey.Secret, "/api/runtime/sample/echo?delayMs=10")).StatusCode);
+        Assert.Equal(HttpStatusCode.InternalServerError, (await SendRuntimeAsync(runtimeClient, apiKey.Secret, "/api/runtime/sample/echo?status=500")).StatusCode);
+        Assert.Equal((HttpStatusCode)429, (await SendRuntimeAsync(runtimeClient, apiKey.Secret, "/api/runtime/sample/echo")).StatusCode);
+
+        var wrongScopeSecret = await CreateWrongScopeKeyAsync(factory, organization.Id, project.Id, environment.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await SendRuntimeAsync(runtimeClient, wrongScopeSecret, "/api/runtime/sample/echo")).StatusCode);
+
+        await PostJsonAsync<ApiKeyRevokeDto>(
             ownerClient,
-            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
-            new { name = "Production deploys" });
+            $"/api/organizations/{organization.Id}/api-keys/{apiKey.Id}/revoke",
+            new { });
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SendRuntimeAsync(runtimeClient, apiKey.Secret, "/api/runtime/sample/echo")).StatusCode);
 
-        using var anonymousClient = factory.CreateClient();
-        var response = await RegisterAsync(anonymousClient, token.Secret, RegistrationPayload("v1", "staging"));
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
+        var meteredKey = await dbContext.ApiKeys.SingleAsync(candidate => candidate.Id == apiKey.Id);
+        Assert.Equal(4, meteredKey.TotalRequestCount);
+        Assert.Equal(3, meteredKey.FailureCount);
+        Assert.Equal(1, meteredKey.RateLimitHitCount);
+        Assert.NotNull(meteredKey.LastUsedAt);
+        Assert.True(meteredKey.LatencySampleCount >= 2);
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var daily = await dbContext.ApiKeyUsageDaily.SingleAsync(candidate => candidate.ApiKeyId == apiKey.Id);
+        Assert.Equal(4, daily.RequestCount);
+        Assert.Equal(3, daily.FailureCount);
+        Assert.Equal(1, daily.RateLimitHitCount);
+
+        var wrongScopePrefix = wrongScopeSecret[..16];
+        var wrongScopeKey = await dbContext.ApiKeys.SingleAsync(candidate => candidate.KeyPrefix == wrongScopePrefix);
+        Assert.Equal(1, wrongScopeKey.TotalRequestCount);
+        Assert.Equal(1, wrongScopeKey.FailureCount);
     }
 
-    private static object RegistrationPayload(string version, string environment)
+    private static async Task<ApiKeyCreateDto> CreateApiKeyAsync(
+        HttpClient client,
+        Guid organizationId,
+        Guid projectId,
+        Guid environmentId,
+        string name,
+        int rateLimitPerMinute)
     {
-        return new
-        {
-            repo = "fullstack-nick/sample-app",
-            environment,
-            serviceUrl = "https://sample.example.com",
-            healthUrl = "https://sample.example.com/health",
-            commitSha = "abcdef1234567890",
-            version,
-            imageDigest = $"sha256:{version}",
-            capabilities = new[] { "health", "deployment-events" }
-        };
+        return await PostJsonAsync<ApiKeyCreateDto>(
+            client,
+            $"/api/organizations/{organizationId}/projects/{projectId}/environments/{environmentId}/api-keys",
+            new { name, scopes = new[] { "sample:read" }, rateLimitPerMinute });
     }
 
-    private static async Task<HttpResponseMessage> RegisterAsync(HttpClient client, string token, object payload)
+    private static async Task<string> CreateWrongScopeKeyAsync(
+        DevControlStage4Factory factory,
+        Guid organizationId,
+        Guid projectId,
+        Guid environmentId)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/apps/register")
-        {
-            Content = JsonContent.Create(payload)
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
+        var apiKeySecretService = scope.ServiceProvider.GetRequiredService<ApiKeySecretService>();
+        var now = DateTimeOffset.UtcNow;
+        var secret = apiKeySecretService.CreateKey();
+        var owner = await dbContext.Users.SingleAsync(user => user.NormalizedEmail == "owner@example.com");
+        dbContext.ApiKeys.Add(new ApiKey(
+            organizationId,
+            projectId,
+            environmentId,
+            "Wrong scope",
+            secret.Prefix,
+            secret.Hash,
+            "[\"flags:read\"]",
+            10,
+            owner.Id,
+            now));
+        await dbContext.SaveChangesAsync();
+        return secret.Secret;
+    }
+
+    private static async Task<HttpResponseMessage> SendRuntimeAsync(HttpClient client, string apiKey, string path)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         return await client.SendAsync(request);
     }
 
@@ -158,7 +189,7 @@ public sealed partial class AppRegistryEndpointTests
         var project = await PostJsonAsync<ProjectDto>(
             client,
             $"/api/organizations/{organization.Id}/projects",
-            new { name = "Sample App", slug = "sample-app", description = "Stage 3 sample" });
+            new { name = "Sample App", slug = "sample-app", description = "Stage 4 sample" });
         var environment = await PostJsonAsync<EnvironmentDto>(
             client,
             $"/api/organizations/{organization.Id}/projects/{project.Id}/environments",
@@ -186,11 +217,11 @@ public sealed partial class AppRegistryEndpointTests
         return await client.SendAsync(request);
     }
 
-    private sealed class DevControlStage3Factory : WebApplicationFactory<Program>
+    private sealed class DevControlStage4Factory : WebApplicationFactory<Program>
     {
         private readonly string? originalConnectionString;
 
-        public DevControlStage3Factory(string connectionString)
+        public DevControlStage4Factory(string connectionString)
         {
             originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DevControl");
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", connectionString);
@@ -309,5 +340,17 @@ public sealed partial class AppRegistryEndpointTests
 
     private sealed record InvitationDto(Guid Id, string Email, string Role, string Status);
 
-    private sealed record RegistrationTokenCreateDto(Guid Id, string Secret, string WorkflowSnippet);
+    private sealed record ApiKeyCreateDto(
+        Guid Id,
+        string Name,
+        string KeyPrefix,
+        IReadOnlyList<string> Scopes,
+        int RateLimitPerMinute,
+        Guid ProjectId,
+        Guid EnvironmentId,
+        DateTimeOffset? RevokedAt,
+        Guid? RotatedFromApiKeyId,
+        string Secret);
+
+    private sealed record ApiKeyRevokeDto(Guid Id, DateTimeOffset? RevokedAt);
 }

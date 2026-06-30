@@ -70,6 +70,13 @@ GitHub Actions snippets, and the live app registry. Existing app repos still own
 their deployments; DevControl records post-deploy runtime facts. See
 [docs/stage-3-live-app-registry.md](docs/stage-3-live-app-registry.md).
 
+## Stage 4 API Keys and Usage
+
+Stage 4 adds project/environment-scoped API keys, show-once runtime secrets,
+revocation/rotation, fixed-window rate limiting, a protected runtime sample
+endpoint, and usage counters visible in DevControl. See
+[docs/stage-4-api-keys-usage.md](docs/stage-4-api-keys-usage.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,

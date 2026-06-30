@@ -21,8 +21,10 @@ public static class DevControlSecurityExtensions
         services.AddScoped<CurrentUserAccessor>();
         services.AddScoped<TenantAccessService>();
         services.AddScoped<AuditLogWriter>();
+        services.AddScoped<RuntimeApiKeyService>();
         services.AddSingleton<InvitationTokenService>();
         services.AddSingleton<RegistrationTokenService>();
+        services.AddSingleton<ApiKeySecretService>();
         services.AddSingleton(TimeProvider.System);
 
         services.AddAntiforgery(options =>

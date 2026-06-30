@@ -119,6 +119,34 @@ type RegistrationTokenCreateResponse = RegistrationToken & {
   workflowSnippet: string;
 };
 
+type ApiKey = {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  rateLimitPerMinute: number;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+  rotatedAt?: string;
+  rotatedFromApiKeyId?: string;
+  rotatedToApiKeyId?: string;
+  totalRequestCount: number;
+  failureCount: number;
+  averageLatencyMilliseconds: number;
+  rateLimitHitCount: number;
+};
+
+type ApiKeyCreateResponse = ApiKey & {
+  secret: string;
+};
+
 type MeResponse = {
   user: User;
   organizations: Organization[];
@@ -209,6 +237,10 @@ function shortSha(value: string) {
   return value.length > 12 ? value.slice(0, 12) : value;
 }
 
+function formatLatency(value: number) {
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ms`;
+}
+
 function inviteTokenFromPath() {
   const match = window.location.pathname.match(/^\/invitations\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -228,7 +260,9 @@ export default function App() {
   const [controlActions, setControlActions] = useState<ControlAction[]>([]);
   const [liveApps, setLiveApps] = useState<LiveApp[]>([]);
   const [registrationTokens, setRegistrationTokens] = useState<RegistrationToken[]>([]);
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [createdToken, setCreatedToken] = useState<RegistrationTokenCreateResponse | undefined>();
+  const [createdApiKey, setCreatedApiKey] = useState<ApiKeyCreateResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -237,6 +271,7 @@ export default function App() {
   const [environmentForm, setEnvironmentForm] = useState({ name: "", slug: "" });
   const [inviteForm, setInviteForm] = useState<{ email: string; role: Role }>({ email: "", role: "Developer" });
   const [tokenForm, setTokenForm] = useState({ name: "" });
+  const [apiKeyForm, setApiKeyForm] = useState({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
   const invitationToken = useMemo(inviteTokenFromPath, []);
 
   const selectedOrg = me?.organizations.find((organization) => organization.id === selectedOrgId);
@@ -252,6 +287,13 @@ export default function App() {
     }
 
     return selectedProjectId ? app.projectId === selectedProjectId : true;
+  });
+  const filteredApiKeys = apiKeys.filter((apiKey) => {
+    if (selectedEnvironmentId) {
+      return apiKey.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? apiKey.projectId === selectedProjectId : true;
   });
 
   async function loadMe(preferredOrganizationId?: string) {
@@ -285,16 +327,18 @@ export default function App() {
       setControlActions([]);
       setLiveApps([]);
       setRegistrationTokens([]);
+      setApiKeys([]);
       return;
     }
 
     const selected = me?.organizations.find((organization) => organization.id === organizationId);
-    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, auditPayload, controlActionPayload] = await Promise.all([
+    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, auditPayload, controlActionPayload] = await Promise.all([
       api<Project[]>(`/api/organizations/${organizationId}/projects`),
       api<LiveApp[]>(`/api/organizations/${organizationId}/apps`),
       roleAtLeast(selected?.role, "Admin") ? api<Member[]>(`/api/organizations/${organizationId}/members`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<Invitation[]>(`/api/organizations/${organizationId}/invitations`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<RegistrationToken[]>(`/api/organizations/${organizationId}/registration-tokens`) : Promise.resolve([]),
+      roleAtLeast(selected?.role, "Admin") ? api<ApiKey[]>(`/api/organizations/${organizationId}/api-keys`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<AuditLog[]>(`/api/organizations/${organizationId}/audit-logs`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Developer") ? api<ControlAction[]>(`/api/organizations/${organizationId}/control-actions`) : Promise.resolve([])
     ]);
@@ -304,6 +348,7 @@ export default function App() {
     setMembers(memberPayload);
     setInvitations(invitationPayload);
     setRegistrationTokens(tokenPayload);
+    setApiKeys(apiKeyPayload);
     setAuditLogs(auditPayload);
     setControlActions(controlActionPayload);
     const nextProjectId = selectedProjectId && projectPayload.some((project) => project.id === selectedProjectId)
@@ -311,6 +356,7 @@ export default function App() {
       : projectPayload[0]?.id ?? "";
     setSelectedProjectId(nextProjectId);
     setCreatedToken(undefined);
+    setCreatedApiKey(undefined);
   }
 
   async function refreshEnvironments(organizationId: string, projectId: string) {
@@ -457,6 +503,56 @@ export default function App() {
       await api(`/api/organizations/${selectedOrgId}/registration-tokens/${token.id}/revoke`, { method: "POST" });
       await refreshOrgData(selectedOrgId);
       setNotice("Registration token revoked.");
+    });
+  }
+
+  async function createApiKey(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const rateLimitPerMinute = Number.parseInt(apiKeyForm.rateLimitPerMinute, 10);
+      const apiKey = await api<ApiKeyCreateResponse>(
+        `/api/organizations/${selectedOrgId}/projects/${selectedProjectId}/environments/${selectedEnvironmentId}/api-keys`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: apiKeyForm.name,
+            scopes: [apiKeyForm.scope],
+            rateLimitPerMinute
+          })
+        });
+      setApiKeyForm({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
+      await refreshOrgData(selectedOrgId);
+      setCreatedApiKey(apiKey);
+      setNotice("API key created. Copy it now; it will not be shown again.");
+    });
+  }
+
+  async function revokeApiKey(apiKeyItem: ApiKey) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api(`/api/organizations/${selectedOrgId}/api-keys/${apiKeyItem.id}/revoke`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setNotice("API key revoked.");
+    });
+  }
+
+  async function rotateApiKey(apiKeyItem: ApiKey) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const rotated = await api<ApiKeyCreateResponse>(`/api/organizations/${selectedOrgId}/api-keys/${apiKeyItem.id}/rotate`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setCreatedApiKey(rotated);
+      setNotice("API key rotated. Copy the new key now; it will not be shown again.");
     });
   }
 
@@ -722,6 +818,56 @@ export default function App() {
                   <form className="inline-form token-form" onSubmit={createRegistrationToken}>
                     <input placeholder={`Name for ${selectedEnvironment.name}`} value={tokenForm.name} onChange={(event) => setTokenForm({ name: event.target.value })} />
                     <button className="primary" disabled={busy}>Create token</button>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {canManageOrg && (
+              <div className="panel wide">
+                <div className="panel-heading">
+                  <h2>API keys</h2>
+                  <span>{filteredApiKeys.length}</span>
+                </div>
+                {createdApiKey && (
+                  <div className="secret-box">
+                    <strong>Copy this API key now</strong>
+                    <code>{createdApiKey.secret}</code>
+                    <span>Use it as a bearer token or X-DevControl-Api-Key value.</span>
+                  </div>
+                )}
+                <div className="table">
+                  {filteredApiKeys.length === 0 ? <p className="empty">No API keys</p> : null}
+                  {filteredApiKeys.map((apiKeyItem) => (
+                    <div className="table-row api-key-row" key={apiKeyItem.id}>
+                      <div>
+                        <strong>{apiKeyItem.name}</strong>
+                        <span>{apiKeyItem.projectName} / {apiKeyItem.environmentName}</span>
+                        <span>{apiKeyItem.keyPrefix}... / {apiKeyItem.scopes.join(", ")} / {apiKeyItem.rateLimitPerMinute}/min</span>
+                        <span>Last used {formatDate(apiKeyItem.lastUsedAt)}</span>
+                      </div>
+                      <div className="usage-metrics">
+                        <span>{apiKeyItem.totalRequestCount} requests</span>
+                        <span>{apiKeyItem.failureCount} failures</span>
+                        <span>{formatLatency(apiKeyItem.averageLatencyMilliseconds)} avg</span>
+                        <span>{apiKeyItem.rateLimitHitCount} limited</span>
+                      </div>
+                      <span>{apiKeyItem.revokedAt ? "Revoked" : "Active"}</span>
+                      <div className="actions">
+                        <button onClick={() => rotateApiKey(apiKeyItem)} disabled={busy || Boolean(apiKeyItem.revokedAt)}>Rotate</button>
+                        <button onClick={() => revokeApiKey(apiKeyItem)} disabled={busy || Boolean(apiKeyItem.revokedAt)}>Revoke</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {selectedEnvironment && (
+                  <form className="inline-form api-key-form" onSubmit={createApiKey}>
+                    <input placeholder={`Name for ${selectedEnvironment.name}`} value={apiKeyForm.name} onChange={(event) => setApiKeyForm({ ...apiKeyForm, name: event.target.value })} />
+                    <select value={apiKeyForm.scope} onChange={(event) => setApiKeyForm({ ...apiKeyForm, scope: event.target.value })}>
+                      <option value="sample:read">sample:read</option>
+                    </select>
+                    <input type="number" min="1" max="600" value={apiKeyForm.rateLimitPerMinute} onChange={(event) => setApiKeyForm({ ...apiKeyForm, rateLimitPerMinute: event.target.value })} />
+                    <button className="primary" disabled={busy}>Create API key</button>
                   </form>
                 )}
               </div>

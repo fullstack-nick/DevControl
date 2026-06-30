@@ -33,6 +33,12 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
 
     public DbSet<RegistrationToken> RegistrationTokens => Set<RegistrationToken>();
 
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+
+    public DbSet<ApiKeyUsageDaily> ApiKeyUsageDaily => Set<ApiKeyUsageDaily>();
+
+    public DbSet<ApiKeyRateLimitWindow> ApiKeyRateLimitWindows => Set<ApiKeyRateLimitWindow>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -49,6 +55,9 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
         ConfigureLiveApp(modelBuilder);
         ConfigureLiveAppDeployment(modelBuilder);
         ConfigureRegistrationToken(modelBuilder);
+        ConfigureApiKey(modelBuilder);
+        ConfigureApiKeyUsageDaily(modelBuilder);
+        ConfigureApiKeyRateLimitWindow(modelBuilder);
         ConfigureDataProtectionKey(modelBuilder);
     }
 
@@ -521,6 +530,142 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(token => token.RevokedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureApiKey(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ApiKey>(entity =>
+        {
+            entity.ToTable("api_keys");
+            entity.HasKey(apiKey => apiKey.Id);
+
+            entity.Property(apiKey => apiKey.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(apiKey => apiKey.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(apiKey => apiKey.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(apiKey => apiKey.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(apiKey => apiKey.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(apiKey => apiKey.KeyPrefix).HasColumnName("key_prefix").HasMaxLength(32).IsRequired();
+            entity.Property(apiKey => apiKey.KeyHash).HasColumnName("key_hash").HasMaxLength(64).IsRequired();
+            entity.Property(apiKey => apiKey.ScopesJson).HasColumnName("scopes_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(apiKey => apiKey.RateLimitPerMinute).HasColumnName("rate_limit_per_minute").IsRequired();
+            entity.Property(apiKey => apiKey.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(apiKey => apiKey.RevokedByUserId).HasColumnName("revoked_by_user_id");
+            entity.Property(apiKey => apiKey.RotatedFromApiKeyId).HasColumnName("rotated_from_api_key_id");
+            entity.Property(apiKey => apiKey.RotatedToApiKeyId).HasColumnName("rotated_to_api_key_id");
+            entity.Property(apiKey => apiKey.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(apiKey => apiKey.LastUsedAt).HasColumnName("last_used_at");
+            entity.Property(apiKey => apiKey.RevokedAt).HasColumnName("revoked_at");
+            entity.Property(apiKey => apiKey.RotatedAt).HasColumnName("rotated_at");
+            entity.Property(apiKey => apiKey.TotalRequestCount).HasColumnName("total_request_count").IsRequired();
+            entity.Property(apiKey => apiKey.FailureCount).HasColumnName("failure_count").IsRequired();
+            entity.Property(apiKey => apiKey.RateLimitHitCount).HasColumnName("rate_limit_hit_count").IsRequired();
+            entity.Property(apiKey => apiKey.TotalLatencyMilliseconds).HasColumnName("total_latency_milliseconds").IsRequired();
+            entity.Property(apiKey => apiKey.LatencySampleCount).HasColumnName("latency_sample_count").IsRequired();
+
+            entity.HasIndex(apiKey => apiKey.OrganizationId);
+            entity.HasIndex(apiKey => apiKey.ProjectId);
+            entity.HasIndex(apiKey => apiKey.EnvironmentId);
+            entity.HasIndex(apiKey => apiKey.KeyHash).IsUnique();
+            entity.HasIndex(apiKey => new { apiKey.OrganizationId, apiKey.ProjectId, apiKey.EnvironmentId, apiKey.CreatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(apiKey => apiKey.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(apiKey => apiKey.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(apiKey => apiKey.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(apiKey => apiKey.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(apiKey => apiKey.RevokedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureApiKeyUsageDaily(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ApiKeyUsageDaily>(entity =>
+        {
+            entity.ToTable("api_key_usage_daily");
+            entity.HasKey(usage => usage.Id);
+
+            entity.Property(usage => usage.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(usage => usage.ApiKeyId).HasColumnName("api_key_id").IsRequired();
+            entity.Property(usage => usage.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(usage => usage.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(usage => usage.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(usage => usage.Day).HasColumnName("day").HasColumnType("date").IsRequired();
+            entity.Property(usage => usage.Endpoint).HasColumnName("endpoint").HasMaxLength(160).IsRequired();
+            entity.Property(usage => usage.RequestCount).HasColumnName("request_count").IsRequired();
+            entity.Property(usage => usage.FailureCount).HasColumnName("failure_count").IsRequired();
+            entity.Property(usage => usage.RateLimitHitCount).HasColumnName("rate_limit_hit_count").IsRequired();
+            entity.Property(usage => usage.TotalLatencyMilliseconds).HasColumnName("total_latency_milliseconds").IsRequired();
+            entity.Property(usage => usage.LatencySampleCount).HasColumnName("latency_sample_count").IsRequired();
+            entity.Property(usage => usage.UpdatedAt).HasColumnName("updated_at").IsRequired();
+
+            entity.HasIndex(usage => usage.ApiKeyId);
+            entity.HasIndex(usage => new { usage.OrganizationId, usage.Day });
+            entity.HasIndex(usage => new { usage.ApiKeyId, usage.Endpoint, usage.Day }).IsUnique();
+
+            entity.HasOne<ApiKey>()
+                .WithMany()
+                .HasForeignKey(usage => usage.ApiKeyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(usage => usage.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(usage => usage.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(usage => usage.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureApiKeyRateLimitWindow(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ApiKeyRateLimitWindow>(entity =>
+        {
+            entity.ToTable("api_key_rate_limit_windows");
+            entity.HasKey(window => window.Id);
+
+            entity.Property(window => window.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(window => window.ApiKeyId).HasColumnName("api_key_id").IsRequired();
+            entity.Property(window => window.Endpoint).HasColumnName("endpoint").HasMaxLength(160).IsRequired();
+            entity.Property(window => window.WindowStart).HasColumnName("window_start").IsRequired();
+            entity.Property(window => window.RequestCount).HasColumnName("request_count").IsRequired();
+            entity.Property(window => window.RateLimitHitCount).HasColumnName("rate_limit_hit_count").IsRequired();
+            entity.Property(window => window.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(window => window.UpdatedAt).HasColumnName("updated_at").IsRequired();
+
+            entity.HasIndex(window => window.ApiKeyId);
+            entity.HasIndex(window => new { window.ApiKeyId, window.Endpoint, window.WindowStart }).IsUnique();
+
+            entity.HasOne<ApiKey>()
+                .WithMany()
+                .HasForeignKey(window => window.ApiKeyId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

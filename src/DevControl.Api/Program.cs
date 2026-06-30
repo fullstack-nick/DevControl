@@ -101,6 +101,7 @@ app.MapGet("/health/ready", async (
 app.MapAuthEndpoints();
 app.MapTenantEndpoints();
 app.MapAppRegistryEndpoints();
+app.MapApiKeyEndpoints();
 
 app.MapFallbackToFile("index.html");
 

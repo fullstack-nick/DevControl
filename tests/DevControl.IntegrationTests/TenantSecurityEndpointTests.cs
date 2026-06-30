@@ -200,6 +200,9 @@ public sealed partial class TenantSecurityEndpointTests
             var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
             await dbContext.Database.ExecuteSqlRawAsync("""
                 DROP TABLE IF EXISTS
+                    api_key_rate_limit_windows,
+                    api_key_usage_daily,
+                    api_keys,
                     live_app_deployments,
                     live_apps,
                     registration_tokens,
