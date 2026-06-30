@@ -73,6 +73,42 @@ public sealed class CliRunnerTests
         Assert.Contains("\"commitSha\":\"abcdef1234567890\"", handler.Body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AdminBootstrapLiveProof_UsesOperatorHeaderAndDoesNotLogSecret()
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var handler = new RecordingHandler();
+        var environment = new Dictionary<string, string?>
+        {
+            ["DEVCONTROL_SERVER"] = "https://devcontrol.example.com",
+            ["DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET"] = "operator-secret"
+        };
+        var runner = new CliRunner(
+            new HttpClient(handler),
+            new CliConfigurationStore(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json")),
+            output,
+            error,
+            key => environment.GetValueOrDefault(key));
+
+        var exitCode = await runner.RunAsync([
+            "admin",
+            "bootstrap-live-proof",
+            "--owner-email",
+            "owner@example.com",
+            "--json"
+        ]);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
+        Assert.Equal("https://devcontrol.example.com/api/operator/bootstrap-live-proof", handler.Request.RequestUri!.ToString());
+        Assert.True(handler.Request.Headers.TryGetValues("X-DevControl-Operator-Secret", out var headerValues));
+        Assert.Equal("operator-secret", Assert.Single(headerValues));
+        Assert.Contains("\"ownerEmail\":\"owner@example.com\"", handler.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("operator-secret", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("operator-secret", error.ToString(), StringComparison.Ordinal);
+    }
+
     private sealed class RecordingHandler : HttpMessageHandler
     {
         public HttpRequestMessage? Request { get; private set; }
@@ -85,13 +121,33 @@ public sealed class CliRunnerTests
             Body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(JsonSerializer.Serialize(new
-                {
-                    repo = "fullstack-nick/sample",
-                    environmentSlug = "production",
-                    version = "v1"
-                }))
+                Content = new StringContent(ResponseJson(request))
             };
+        }
+
+        private static string ResponseJson(HttpRequestMessage request)
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/api/operator/bootstrap-live-proof", StringComparison.Ordinal))
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    owner = new { id = Guid.NewGuid(), email = "owner@example.com", displayName = "owner@example.com" },
+                    organization = new { id = Guid.NewGuid(), name = "Acme Platform", slug = "acme-platform" },
+                    project = new { id = Guid.NewGuid(), name = "Sample App", slug = "sample-app" },
+                    environment = new { id = Guid.NewGuid(), name = "Production", slug = "production" },
+                    registrationToken = new { id = Guid.NewGuid(), name = "Operator bootstrap registration token", tokenPrefix = "dcr_prefix", scope = "apps:register", secret = "dcr_show_once" },
+                    apiKey = new { id = Guid.NewGuid(), name = "Operator bootstrap API key", keyPrefix = "dck_prefix", scopes = new[] { "sample:read" }, rateLimitPerMinute = 10, secret = "dck_show_once" },
+                    revokedRegistrationTokenIds = Array.Empty<Guid>(),
+                    revokedApiKeyIds = Array.Empty<Guid>()
+                });
+            }
+
+            return JsonSerializer.Serialize(new
+            {
+                repo = "fullstack-nick/sample",
+                environmentSlug = "production",
+                version = "v1"
+            });
         }
     }
 }

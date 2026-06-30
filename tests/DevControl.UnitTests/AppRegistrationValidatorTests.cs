@@ -78,8 +78,11 @@ public sealed class AppRegistrationValidatorTests
 
         Assert.Contains("DEVCONTROL_SERVER: https://devcontrol.example.com", snippet, StringComparison.Ordinal);
         Assert.Contains("DEVCONTROL_TOKEN: dcr_secret", snippet, StringComparison.Ordinal);
+        Assert.Contains("uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main", snippet, StringComparison.Ordinal);
         Assert.Contains("devcontrol apps register", snippet, StringComparison.Ordinal);
         Assert.Contains("--environment production", snippet, StringComparison.Ordinal);
         Assert.Contains("--repo ${{ github.repository }}", snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("src/DevControl.Cli", snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("./.devcontrol-bin/devcontrol", snippet, StringComparison.Ordinal);
     }
 }

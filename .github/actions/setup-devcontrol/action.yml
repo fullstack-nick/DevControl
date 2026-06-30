@@ -1,0 +1,37 @@
+name: Setup DevControl CLI
+description: Install the DevControl CLI from the DevControl repository for private workflow consumers.
+
+inputs:
+  dotnet-version:
+    description: .NET SDK version used to pack and install the CLI.
+    required: false
+    default: 10.0.x
+  configuration:
+    description: Build configuration used for the CLI package.
+    required: false
+    default: Release
+
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Pack and install DevControl CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        package_dir="$RUNNER_TEMP/devcontrol-tool"
+        tool_dir="$RUNNER_TEMP/devcontrol-bin"
+        mkdir -p "$package_dir" "$tool_dir"
+        dotnet pack "${{ github.action_path }}/src/DevControl.Cli/DevControl.Cli.csproj" \
+          --configuration "${{ inputs.configuration }}" \
+          --output "$package_dir"
+        dotnet tool install \
+          --tool-path "$tool_dir" \
+          --add-source "$package_dir" \
+          DevControl.Cli
+        echo "$tool_dir" >> "$GITHUB_PATH"
+        "$tool_dir/devcontrol" --help

@@ -152,6 +152,21 @@ resource "google_cloud_run_v2_service" "devcontrol" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.operator_bootstrap_secret == "" ? [] : [1]
+
+        content {
+          name = "DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET"
+
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.operator_bootstrap_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       resources {
         limits = {
           cpu    = "1"
@@ -168,7 +183,8 @@ resource "google_cloud_run_v2_service" "devcontrol" {
     google_compute_instance.postgres,
     google_secret_manager_secret_iam_member.runtime_can_read_postgres_password,
     google_secret_manager_secret_iam_member.runtime_can_read_google_oauth_client_secret,
-    google_secret_manager_secret_iam_member.runtime_can_read_smtp_password
+    google_secret_manager_secret_iam_member.runtime_can_read_smtp_password,
+    google_secret_manager_secret_iam_member.runtime_can_read_operator_bootstrap_secret
   ]
 
   lifecycle {

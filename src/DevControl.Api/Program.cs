@@ -102,6 +102,7 @@ app.MapAuthEndpoints();
 app.MapTenantEndpoints();
 app.MapAppRegistryEndpoints();
 app.MapApiKeyEndpoints();
+app.MapOperatorEndpoints();
 
 app.MapFallbackToFile("index.html");
 

@@ -58,3 +58,22 @@ resource "google_secret_manager_secret_version" "smtp_password" {
   secret      = google_secret_manager_secret.smtp_password[0].id
   secret_data = var.smtp_password
 }
+
+resource "google_secret_manager_secret" "operator_bootstrap_secret" {
+  count     = var.operator_bootstrap_secret == "" ? 0 : 1
+  secret_id = "${local.app_name}-operator-bootstrap-secret"
+
+  labels = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_version" "operator_bootstrap_secret" {
+  count       = var.operator_bootstrap_secret == "" ? 0 : 1
+  secret      = google_secret_manager_secret.operator_bootstrap_secret[0].id
+  secret_data = var.operator_bootstrap_secret
+}

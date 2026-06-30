@@ -18,16 +18,14 @@ public static class WorkflowSnippetBuilder
     {
         var builder = new StringBuilder();
         builder.AppendLine("- name: Install DevControl CLI");
-        builder.AppendLine("  run: |");
-        builder.AppendLine("    dotnet pack src/DevControl.Cli/DevControl.Cli.csproj --configuration Release --output ./.devcontrol-tool");
-        builder.AppendLine("    dotnet tool install --tool-path ./.devcontrol-bin --add-source ./.devcontrol-tool DevControl.Cli");
+        builder.AppendLine("  uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main");
         builder.AppendLine();
         builder.AppendLine("- name: Register app in DevControl");
         builder.AppendLine("  env:");
         builder.AppendLine($"    DEVCONTROL_SERVER: {context.ServerUrl}");
         builder.AppendLine($"    DEVCONTROL_TOKEN: {context.TokenSecret}");
         builder.AppendLine("  run: |");
-        builder.AppendLine("    ./.devcontrol-bin/devcontrol apps register \\");
+        builder.AppendLine("    devcontrol apps register \\");
         builder.AppendLine($"      --environment {context.EnvironmentSlug} \\");
         builder.AppendLine($"      --service-url {context.ServiceUrlPlaceholder} \\");
         builder.AppendLine($"      --health-url {context.HealthUrlPlaceholder} \\");

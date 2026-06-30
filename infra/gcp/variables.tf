@@ -138,6 +138,13 @@ variable "smtp_password" {
   sensitive   = true
 }
 
+variable "operator_bootstrap_secret" {
+  description = "Optional operator secret that enables the audited live-proof bootstrap endpoint."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "smtp_use_starttls" {
   description = "Whether SMTP delivery should use TLS."
   type        = bool

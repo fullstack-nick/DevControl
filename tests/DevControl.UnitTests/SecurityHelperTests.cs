@@ -46,4 +46,14 @@ public sealed class SecurityHelperTests
         Assert.False(RolePermissions.CanManageOwnerRole(OrganizationRole.Admin));
         Assert.True(RolePermissions.CanManageOwnerRole(OrganizationRole.Owner));
     }
+
+    [Fact]
+    public void OperatorSecretValidator_RequiresExactConfiguredSecret()
+    {
+        Assert.True(OperatorSecretValidator.IsValid("operator-secret", "operator-secret"));
+        Assert.False(OperatorSecretValidator.IsValid(" operator-secret ", "operator-secret"));
+        Assert.False(OperatorSecretValidator.IsValid("operator-secret", "wrong-secret"));
+        Assert.False(OperatorSecretValidator.IsValid("", "operator-secret"));
+        Assert.False(OperatorSecretValidator.IsValid("operator-secret", ""));
+    }
 }

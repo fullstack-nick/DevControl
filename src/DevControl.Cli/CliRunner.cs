@@ -52,6 +52,7 @@ public sealed class CliRunner
             {
                 "config" => await RunConfigAsync(args[1..]),
                 "apps" => await RunAppsAsync(args[1..]),
+                "admin" => await RunAdminAsync(args[1..]),
                 _ => Fail($"Unknown command '{args[0]}'.")
             };
         }
@@ -150,6 +151,21 @@ public sealed class CliRunner
         };
     }
 
+    private Task<int> RunAdminAsync(string[] args)
+    {
+        if (args.Length == 0 || IsHelp(args[0]))
+        {
+            WriteAdminHelp();
+            return Task.FromResult(0);
+        }
+
+        return args[0] switch
+        {
+            "bootstrap-live-proof" => AdminBootstrapLiveProofAsync(args[1..]),
+            _ => Task.FromResult(Fail($"Unknown admin command '{args[0]}'.")),
+        };
+    }
+
     private async Task<int> AppsRegisterAsync(string[] args)
     {
         var options = ParsedArgs.Parse(args);
@@ -198,6 +214,60 @@ public sealed class CliRunner
         return 0;
     }
 
+    private async Task<int> AdminBootstrapLiveProofAsync(string[] args)
+    {
+        var options = ParsedArgs.Parse(args);
+        var configuration = await configurationStore.LoadAsync();
+        var server = ResolveServer(options, configuration)
+            ?? throw new CliUsageException("Server is required. Use --server, DEVCONTROL_SERVER, or devcontrol config set.");
+        var operatorSecret = options.Value("operator-secret") ??
+            environment("DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET") ??
+            throw new CliUsageException("Operator secret is required. Use --operator-secret or DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET.");
+
+        var payload = new OperatorBootstrapPayload(
+            options.Required("owner-email"),
+            options.Value("owner-name"),
+            options.Value("organization-name"),
+            options.Value("organization-slug"),
+            options.Value("project-name"),
+            options.Value("project-slug"),
+            options.Value("project-description"),
+            options.Value("environment-name"),
+            options.Value("environment-slug"));
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(server.TrimEnd('/') + "/"), "api/operator/bootstrap-live-proof"))
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Add("X-DevControl-Operator-Secret", operatorSecret);
+
+        using var response = await httpClient.SendAsync(request);
+        var content = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            return Fail($"Operator bootstrap failed with {(int)response.StatusCode}: {content}");
+        }
+
+        if (options.HasFlag("json"))
+        {
+            await output.WriteLineAsync(content);
+        }
+        else
+        {
+            using var document = JsonDocument.Parse(content);
+            var root = document.RootElement;
+            await output.WriteLineAsync("Operator bootstrap complete.");
+            await output.WriteLineAsync($"Owner: {root.GetProperty("owner").GetProperty("email").GetString()}");
+            await output.WriteLineAsync($"Organization: {root.GetProperty("organization").GetProperty("slug").GetString()}");
+            await output.WriteLineAsync($"Project: {root.GetProperty("project").GetProperty("slug").GetString()}");
+            await output.WriteLineAsync($"Environment: {root.GetProperty("environment").GetProperty("slug").GetString()}");
+            await output.WriteLineAsync($"Registration token: {root.GetProperty("registrationToken").GetProperty("secret").GetString()}");
+            await output.WriteLineAsync($"API key: {root.GetProperty("apiKey").GetProperty("secret").GetString()}");
+        }
+
+        return 0;
+    }
+
     private string? ResolveServer(ParsedArgs options, CliConfiguration? configuration)
     {
         return options.Value("server") ??
@@ -241,6 +311,7 @@ public sealed class CliRunner
         output.WriteLine("  devcontrol config show [--json]");
         output.WriteLine("  devcontrol config clear");
         output.WriteLine("  devcontrol apps register --environment <slug> --service-url <url> --health-url <url> --version <version> --image-digest <digest> --capabilities <list>");
+        output.WriteLine("  devcontrol admin bootstrap-live-proof --owner-email <email>");
     }
 
     private void WriteConfigHelp()
@@ -251,6 +322,11 @@ public sealed class CliRunner
     private void WriteAppsHelp()
     {
         output.WriteLine("Usage: devcontrol apps register [options]");
+    }
+
+    private void WriteAdminHelp()
+    {
+        output.WriteLine("Usage: devcontrol admin bootstrap-live-proof --owner-email <email> [options]");
     }
 
     private static bool IsHelp(string value)
@@ -267,6 +343,17 @@ public sealed class CliRunner
         string Version,
         string ImageDigest,
         IReadOnlyList<string> Capabilities);
+
+    private sealed record OperatorBootstrapPayload(
+        string OwnerEmail,
+        string? OwnerName,
+        string? OrganizationName,
+        string? OrganizationSlug,
+        string? ProjectName,
+        string? ProjectSlug,
+        string? ProjectDescription,
+        string? EnvironmentName,
+        string? EnvironmentSlug);
 }
 
 public sealed class CliUsageException(string message) : Exception(message);
