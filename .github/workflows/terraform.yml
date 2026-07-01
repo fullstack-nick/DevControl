@@ -61,10 +61,12 @@ jobs:
         run: terraform init
 
       - name: Terraform plan
+        env:
+          TF_VAR_github_app_id: ${{ vars.DEVCONTROL_GITHUB_APP_ID }}
+          TF_VAR_github_app_private_key: ${{ secrets.DEVCONTROL_GITHUB_APP_PRIVATE_KEY }}
         run: |
           terraform plan \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var "github_owner=${{ github.repository_owner }}" \
             -var "github_repo=${{ github.event.repository.name }}" \
             -var "operator_google_account=nickaccturk@gmail.com"
-

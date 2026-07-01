@@ -1,8 +1,10 @@
 using System.Text.Json;
+using DevControl.Api.GitHub;
 using DevControl.Api.Monitoring;
 using DevControl.Api.Security;
 using DevControl.Api.Webhooks;
 using DevControl.Application.Apps;
+using DevControl.Application.GitHub;
 using DevControl.Application.Security;
 using DevControl.Application.Webhooks;
 using DevControl.Domain.Entities;
@@ -24,6 +26,7 @@ public static class AppRegistryEndpoints
         var api = app.MapGroup("/api").RequireAuthorization();
 
         api.MapGet("/organizations/{organizationId:guid}/apps", ListAppsAsync);
+        api.MapGet("/organizations/{organizationId:guid}/apps/{liveAppId:guid}/deployments", ListAppDeploymentsAsync);
         api.MapGet("/organizations/{organizationId:guid}/registration-tokens", ListRegistrationTokensAsync);
         api.MapPost(
             "/organizations/{organizationId:guid}/projects/{projectId:guid}/environments/{environmentId:guid}/registration-tokens",
@@ -38,44 +41,13 @@ public static class AppRegistryEndpoints
         HttpContext httpContext,
         DevControlDbContext dbContext,
         RegistrationTokenService tokenService,
+        IGitHubOidcTokenValidator gitHubOidcTokenValidator,
         AuditLogWriter auditLogWriter,
         MonitorProvisioningService monitorProvisioningService,
         WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
-        var bearerToken = GetBearerToken(httpContext);
-        if (bearerToken is null)
-        {
-            return Results.Unauthorized();
-        }
-
-        var tokenHash = tokenService.HashToken(bearerToken);
-        var token = await dbContext.RegistrationTokens
-            .SingleOrDefaultAsync(candidate => candidate.TokenHash == tokenHash, cancellationToken);
-
-        if (token is null || token.IsRevoked || token.Scope != RegisterScope)
-        {
-            return Results.Unauthorized();
-        }
-
-        var project = await dbContext.Projects
-            .SingleOrDefaultAsync(candidate =>
-                    candidate.OrganizationId == token.OrganizationId &&
-                    candidate.Id == token.ProjectId,
-                cancellationToken);
-        var environment = await dbContext.ProjectEnvironments
-            .SingleOrDefaultAsync(candidate =>
-                    candidate.OrganizationId == token.OrganizationId &&
-                    candidate.ProjectId == token.ProjectId &&
-                    candidate.Id == token.EnvironmentId,
-                cancellationToken);
-
-        if (project is null || environment is null)
-        {
-            return Results.Unauthorized();
-        }
-
         var validation = AppRegistrationValidator.Validate(new AppRegistrationInput(
             request.Repo,
             request.Environment,
@@ -92,26 +64,37 @@ public static class AppRegistryEndpoints
         }
 
         var details = validation.Details!;
-        if (!string.Equals(details.Environment, environment.Slug, StringComparison.OrdinalIgnoreCase))
+        var registrationContext = await ResolveRegistrationContextAsync(
+            request,
+            details,
+            httpContext,
+            dbContext,
+            tokenService,
+            gitHubOidcTokenValidator,
+            cancellationToken);
+        if (registrationContext.Failure is not null)
         {
-            return Results.Forbid();
+            return registrationContext.Failure;
         }
 
+        var context = registrationContext.Context!;
+        var project = context.Project;
+        var environment = context.Environment;
         var now = timeProvider.GetUtcNow();
         var liveApp = await dbContext.LiveApps
             .SingleOrDefaultAsync(candidate =>
-                    candidate.OrganizationId == token.OrganizationId &&
-                    candidate.ProjectId == token.ProjectId &&
-                    candidate.EnvironmentId == token.EnvironmentId &&
+                    candidate.OrganizationId == context.OrganizationId &&
+                    candidate.ProjectId == project.Id &&
+                    candidate.EnvironmentId == environment.Id &&
                     candidate.NormalizedRepo == details.NormalizedRepo,
                 cancellationToken);
 
         if (liveApp is null)
         {
             liveApp = new LiveApp(
-                token.OrganizationId,
-                token.ProjectId,
-                token.EnvironmentId,
+                context.OrganizationId,
+                project.Id,
+                environment.Id,
                 details.Repo,
                 details.NormalizedRepo,
                 details.ServiceUrl,
@@ -120,6 +103,8 @@ public static class AppRegistryEndpoints
                 details.Version,
                 details.ImageDigest,
                 details.CapabilitiesJson,
+                context.GitHubRunId,
+                context.GitHubRunUrl,
                 now);
             dbContext.LiveApps.Add(liveApp);
         }
@@ -134,14 +119,16 @@ public static class AppRegistryEndpoints
                 details.Version,
                 details.ImageDigest,
                 details.CapabilitiesJson,
+                context.GitHubRunId,
+                context.GitHubRunUrl,
                 now);
         }
 
         dbContext.LiveAppDeployments.Add(new LiveAppDeployment(
             liveApp.Id,
-            token.OrganizationId,
-            token.ProjectId,
-            token.EnvironmentId,
+            context.OrganizationId,
+            project.Id,
+            environment.Id,
             details.Repo,
             details.ServiceUrl,
             details.HealthUrl,
@@ -149,12 +136,22 @@ public static class AppRegistryEndpoints
             details.Version,
             details.ImageDigest,
             details.CapabilitiesJson,
+            context.GitHubRunId,
+            context.GitHubRunUrl,
             now));
-        await monitorProvisioningService.EnsureManagedMonitorAsync(liveApp, token.CreatedByUserId, now, cancellationToken);
-        token.MarkUsed(now);
+        await monitorProvisioningService.EnsureManagedMonitorAsync(liveApp, context.RequestedByUserId, now, cancellationToken);
+        if (context.RegistrationToken is not null)
+        {
+            context.RegistrationToken.MarkUsed(now);
+        }
+
+        if (context.RepoConnection is not null && context.RepoConnection.LiveAppId != liveApp.Id)
+        {
+            context.RepoConnection.LinkLiveApp(liveApp.Id, now);
+        }
 
         auditLogWriter.Add(
-            token.OrganizationId,
+            context.OrganizationId,
             null,
             "app.register",
             "Succeeded",
@@ -165,17 +162,20 @@ public static class AppRegistryEndpoints
             {
                 details.Repo,
                 details.Environment,
-                token.TokenPrefix,
+                authKind = context.AuthKind,
+                tokenPrefix = context.RegistrationToken?.TokenPrefix,
                 details.CommitSha,
                 details.Version,
-                capabilities = details.Capabilities
+                capabilities = details.Capabilities,
+                gitHubRunId = context.GitHubRunId,
+                gitHubRunUrl = context.GitHubRunUrl
             },
-            token.ProjectId,
-            token.EnvironmentId);
+            project.Id,
+            environment.Id);
         await webhookEventPublisher.PublishAsync(
-            token.OrganizationId,
-            token.ProjectId,
-            token.EnvironmentId,
+            context.OrganizationId,
+            project.Id,
+            environment.Id,
             WebhookEventTypes.AppRegistered,
             "live_app",
             liveApp.Id.ToString(),
@@ -191,7 +191,9 @@ public static class AppRegistryEndpoints
                 details.CommitSha,
                 details.Version,
                 details.ImageDigest,
-                capabilities = details.Capabilities
+                capabilities = details.Capabilities,
+                gitHubRunId = context.GitHubRunId,
+                gitHubRunUrl = context.GitHubRunUrl
             },
             now,
             cancellationToken);
@@ -286,6 +288,48 @@ public static class AppRegistryEndpoints
             .ToListAsync(cancellationToken);
 
         return Results.Ok(tokens);
+    }
+
+    private static async Task<IResult> ListAppDeploymentsAsync(
+        Guid organizationId,
+        Guid liveAppId,
+        CurrentUserAccessor currentUserAccessor,
+        TenantAccessService tenantAccess,
+        DevControlDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var actor = await currentUserAccessor.GetOrCreateAsync(cancellationToken);
+        var access = await tenantAccess.RequireAsync(organizationId, actor, OrganizationRole.Viewer, cancellationToken);
+        var failure = AccessFailure(access);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        if (!await dbContext.LiveApps.AnyAsync(liveApp => liveApp.OrganizationId == organizationId && liveApp.Id == liveAppId, cancellationToken))
+        {
+            return Results.NotFound();
+        }
+
+        var deployments = await dbContext.LiveAppDeployments
+            .Where(deployment => deployment.OrganizationId == organizationId && deployment.LiveAppId == liveAppId)
+            .OrderByDescending(deployment => deployment.RegisteredAt)
+            .Take(20)
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(deployments.Select(deployment => new LiveAppDeploymentResponse(
+                deployment.Id,
+                deployment.LiveAppId,
+                deployment.Repo,
+                deployment.ServiceUrl,
+                deployment.HealthUrl,
+                deployment.CommitSha,
+                deployment.Version,
+                deployment.ImageDigest,
+                DeserializeCapabilities(deployment.CapabilitiesJson),
+                deployment.GitHubRunId,
+                deployment.GitHubRunUrl,
+                deployment.RegisteredAt)));
     }
 
     private static async Task<IResult> CreateRegistrationTokenAsync(
@@ -475,8 +519,174 @@ public static class AppRegistryEndpoints
             liveApp.Version,
             liveApp.ImageDigest,
             capabilities,
+            liveApp.GitHubRunId,
+            liveApp.GitHubRunUrl,
             liveApp.CreatedAt,
             liveApp.LastRegisteredAt);
+    }
+
+    private static async Task<RegistrationContextResult> ResolveRegistrationContextAsync(
+        AppRegisterRequest request,
+        AppRegistrationDetails details,
+        HttpContext httpContext,
+        DevControlDbContext dbContext,
+        RegistrationTokenService tokenService,
+        IGitHubOidcTokenValidator gitHubOidcTokenValidator,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(request.GitHubOidcToken))
+        {
+            return await ResolveGitHubOidcRegistrationContextAsync(
+                request.GitHubOidcToken!,
+                details,
+                httpContext,
+                dbContext,
+                gitHubOidcTokenValidator,
+                cancellationToken);
+        }
+
+        var bearerToken = GetBearerToken(httpContext);
+        if (bearerToken is null)
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        var tokenHash = tokenService.HashToken(bearerToken);
+        var token = await dbContext.RegistrationTokens
+            .SingleOrDefaultAsync(candidate => candidate.TokenHash == tokenHash, cancellationToken);
+
+        if (token is null || token.IsRevoked || token.Scope != RegisterScope)
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        var project = await dbContext.Projects
+            .SingleOrDefaultAsync(candidate =>
+                    candidate.OrganizationId == token.OrganizationId &&
+                    candidate.Id == token.ProjectId,
+                cancellationToken);
+        var environment = await dbContext.ProjectEnvironments
+            .SingleOrDefaultAsync(candidate =>
+                    candidate.OrganizationId == token.OrganizationId &&
+                    candidate.ProjectId == token.ProjectId &&
+                    candidate.Id == token.EnvironmentId,
+                cancellationToken);
+
+        if (project is null || environment is null)
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        if (!string.Equals(details.Environment, environment.Slug, StringComparison.OrdinalIgnoreCase))
+        {
+            return RegistrationContextResult.Failed(Results.Forbid());
+        }
+
+        return RegistrationContextResult.Success(new RegistrationContext(
+            token.OrganizationId,
+            project,
+            environment,
+            token.CreatedByUserId,
+            "registration-token",
+            token,
+            null,
+            null,
+            string.Empty));
+    }
+
+    private static async Task<RegistrationContextResult> ResolveGitHubOidcRegistrationContextAsync(
+        string oidcToken,
+        AppRegistrationDetails details,
+        HttpContext httpContext,
+        DevControlDbContext dbContext,
+        IGitHubOidcTokenValidator gitHubOidcTokenValidator,
+        CancellationToken cancellationToken)
+    {
+        var claims = await gitHubOidcTokenValidator.ValidateAsync(
+            oidcToken,
+            BuildRegistrationAudience(httpContext),
+            cancellationToken);
+        if (claims is null)
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        if (!GitHubRepoNameParser.TryParse(claims.Repository, out var repo) ||
+            !string.Equals(repo.NormalizedFullName, details.NormalizedRepo, StringComparison.Ordinal))
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        var matches = await dbContext.GitHubRepoConnections
+            .Where(connection => connection.NormalizedRepo == details.NormalizedRepo)
+            .Join(
+                dbContext.ProjectEnvironments.Where(environment => environment.Slug == details.Environment),
+                connection => connection.EnvironmentId,
+                environment => environment.Id,
+                (connection, environment) => new { connection, environment })
+            .Join(
+                dbContext.Projects,
+                candidate => candidate.connection.ProjectId,
+                project => project.Id,
+                (candidate, project) => new { candidate.connection, candidate.environment, project })
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        if (matches.Count == 0)
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        if (matches.Count > 1)
+        {
+            return RegistrationContextResult.Failed(Results.Conflict(new ProblemDetailsResponse("GitHub OIDC registration matched multiple repo connections.")));
+        }
+
+        var match = matches[0];
+        if (!WorkflowRefMatches(claims.WorkflowRef, claims.Repository, match.connection.WorkflowPath))
+        {
+            return RegistrationContextResult.Failed(Results.Unauthorized());
+        }
+
+        var runId = long.TryParse(claims.RunId, out var parsedRunId) ? parsedRunId : (long?)null;
+        var runUrl = runId.HasValue ? $"https://github.com/{repo.FullName}/actions/runs/{runId.Value}" : string.Empty;
+        return RegistrationContextResult.Success(new RegistrationContext(
+            match.connection.OrganizationId,
+            match.project,
+            match.environment,
+            match.connection.CreatedByUserId,
+            "github-oidc",
+            null,
+            match.connection,
+            runId,
+            runUrl));
+    }
+
+    private static bool WorkflowRefMatches(string workflowRef, string repository, string workflowPath)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRef))
+        {
+            return false;
+        }
+
+        return workflowRef.StartsWith($"{repository}/{workflowPath}@", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string BuildRegistrationAudience(HttpContext httpContext)
+    {
+        return $"{BuildPublicBaseUrl(httpContext)}/api/apps/register";
+    }
+
+    public static string BuildPublicBaseUrl(HttpContext httpContext)
+    {
+        var scheme = httpContext.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && !string.IsNullOrWhiteSpace(forwardedProto.ToString())
+            ? forwardedProto.ToString().Split(',')[0].Trim()
+            : httpContext.Request.Scheme;
+        var host = httpContext.Request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost) && !string.IsNullOrWhiteSpace(forwardedHost.ToString())
+            ? forwardedHost.ToString().Split(',')[0].Trim()
+            : httpContext.Request.Host.Value;
+
+        return $"{scheme}://{host}".TrimEnd('/');
     }
 
     private static IReadOnlyList<string> DeserializeCapabilities(string capabilitiesJson)
@@ -510,7 +720,8 @@ public sealed record AppRegisterRequest(
     string? CommitSha,
     string? Version,
     string? ImageDigest,
-    IReadOnlyList<string>? Capabilities);
+    IReadOnlyList<string>? Capabilities,
+    string? GitHubOidcToken);
 
 public sealed record ValidationProblemDetailsResponse(IReadOnlyList<string> Errors);
 
@@ -529,10 +740,26 @@ public sealed record LiveAppResponse(
     string Version,
     string ImageDigest,
     IReadOnlyList<string> Capabilities,
+    long? GitHubRunId,
+    string GitHubRunUrl,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastRegisteredAt);
 
 public sealed record RegistrationTokenCreateRequest(string? Name);
+
+public sealed record LiveAppDeploymentResponse(
+    Guid Id,
+    Guid LiveAppId,
+    string Repo,
+    string ServiceUrl,
+    string HealthUrl,
+    string CommitSha,
+    string Version,
+    string ImageDigest,
+    IReadOnlyList<string> Capabilities,
+    long? GitHubRunId,
+    string GitHubRunUrl,
+    DateTimeOffset RegisteredAt);
 
 public sealed record RegistrationTokenResponse(
     Guid Id,
@@ -565,3 +792,21 @@ public sealed record RegistrationTokenCreateResponse(
     string WorkflowSnippet);
 
 public sealed record RegistrationTokenRevokeResponse(Guid Id, DateTimeOffset? RevokedAt);
+
+internal sealed record RegistrationContext(
+    Guid OrganizationId,
+    Project Project,
+    ProjectEnvironment Environment,
+    Guid RequestedByUserId,
+    string AuthKind,
+    RegistrationToken? RegistrationToken,
+    GitHubRepoConnection? RepoConnection,
+    long? GitHubRunId,
+    string GitHubRunUrl);
+
+internal sealed record RegistrationContextResult(RegistrationContext? Context, IResult? Failure)
+{
+    public static RegistrationContextResult Success(RegistrationContext context) => new(context, null);
+
+    public static RegistrationContextResult Failed(IResult failure) => new(null, failure);
+}

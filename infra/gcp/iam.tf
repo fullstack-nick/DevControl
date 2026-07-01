@@ -58,6 +58,13 @@ resource "google_secret_manager_secret_iam_member" "runtime_can_read_operator_bo
   member    = "serviceAccount:${google_service_account.runtime.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "runtime_can_read_github_app_private_key" {
+  count     = var.github_app_private_key == "" ? 0 : 1
+  secret_id = google_secret_manager_secret.github_app_private_key[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 resource "google_project_iam_member" "github_deployer_run_admin" {
   project = var.project_id
   role    = "roles/run.admin"

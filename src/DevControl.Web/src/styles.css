@@ -287,6 +287,23 @@ label {
   align-items: flex-start;
 }
 
+.live-control {
+  display: grid;
+  min-width: min(420px, 100%);
+  gap: 8px;
+}
+
+.rollback-row,
+.github-resolution {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rollback-row select {
+  min-width: 220px;
+}
+
 .secret-box {
   display: grid;
   gap: 10px;
@@ -324,6 +341,15 @@ label {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.github-resolve-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.github-onboarding-form {
+  grid-template-columns: minmax(220px, 1.2fr) minmax(100px, 0.4fr) repeat(5, minmax(180px, 1fr)) auto;
+  align-items: start;
+}
+
 .table-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 160px auto;
@@ -341,6 +367,16 @@ label {
 
 .webhook-row {
   grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr) auto;
+  align-items: start;
+}
+
+.github-pr-row {
+  grid-template-columns: minmax(0, 1fr) 110px auto;
+  align-items: start;
+}
+
+.github-dispatch-row {
+  grid-template-columns: minmax(0, 1fr) 190px 90px;
   align-items: start;
 }
 
@@ -552,6 +588,8 @@ label {
   .inline-form.incident-form,
   .inline-form.incident-update-form,
   .inline-form.release-form,
+  .github-resolve-form,
+  .github-onboarding-form,
   .table-row,
   .event-grid,
   .flag-controls,

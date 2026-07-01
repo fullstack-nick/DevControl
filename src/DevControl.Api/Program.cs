@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevControl.Api.Endpoints;
+using DevControl.Api.GitHub;
 using DevControl.Api.Monitoring;
 using DevControl.Api.Security;
 using DevControl.Api.Webhooks;
@@ -30,6 +31,10 @@ builder.Services.AddScoped<WebhookDeliveryService>();
 builder.Services.AddScoped<MonitorProvisioningService>();
 builder.Services.AddScoped<IncidentAutomationService>();
 builder.Services.AddScoped<MonitorCheckService>();
+builder.Services.AddSingleton(GitHubAppOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddHttpClient<IGitHubAppClient, GitHubAppClient>();
+builder.Services.AddHttpClient<IGitHubOidcTokenValidator, GitHubOidcTokenValidator>();
+builder.Services.AddScoped<GitHubSyncService>();
 builder.Services.AddScoped<SchedulerTickService>();
 
 var app = builder.Build();
@@ -114,6 +119,7 @@ app.MapApiKeyEndpoints();
 app.MapFeatureFlagEndpoints();
 app.MapWebhookEndpoints();
 app.MapMonitoringEndpoints();
+app.MapGitHubEndpoints();
 app.MapOperatorEndpoints();
 
 app.MapFallbackToFile("index.html");

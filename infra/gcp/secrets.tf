@@ -100,3 +100,22 @@ resource "google_secret_manager_secret_version" "operator_bootstrap_secret" {
   secret      = google_secret_manager_secret.operator_bootstrap_secret[0].id
   secret_data = var.operator_bootstrap_secret
 }
+
+resource "google_secret_manager_secret" "github_app_private_key" {
+  count     = var.github_app_private_key == "" ? 0 : 1
+  secret_id = "${local.app_name}-github-app-private-key"
+
+  labels = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_version" "github_app_private_key" {
+  count       = var.github_app_private_key == "" ? 0 : 1
+  secret      = google_secret_manager_secret.github_app_private_key[0].id
+  secret_data = var.github_app_private_key
+}

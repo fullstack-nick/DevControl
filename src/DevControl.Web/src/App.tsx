@@ -94,8 +94,25 @@ type LiveApp = {
   version: string;
   imageDigest: string;
   capabilities: string[];
+  gitHubRunId?: number;
+  gitHubRunUrl: string;
   createdAt: string;
   lastRegisteredAt: string;
+};
+
+type LiveAppDeployment = {
+  id: string;
+  liveAppId: string;
+  repo: string;
+  serviceUrl: string;
+  healthUrl: string;
+  commitSha: string;
+  version: string;
+  imageDigest: string;
+  capabilities: string[];
+  gitHubRunId?: number;
+  gitHubRunUrl: string;
+  registeredAt: string;
 };
 
 type RegistrationToken = {
@@ -117,6 +134,83 @@ type RegistrationToken = {
 type RegistrationTokenCreateResponse = RegistrationToken & {
   secret: string;
   workflowSnippet: string;
+};
+
+type GitHubWorkflowInfo = {
+  id: number;
+  name: string;
+  path: string;
+  state: string;
+};
+
+type GitHubRepositoryResolution = {
+  fullName: string;
+  defaultBranch: string;
+  htmlUrl: string;
+  installationId: number;
+  installationAccount: string;
+  workflows: GitHubWorkflowInfo[];
+};
+
+type GitHubRepoConnection = {
+  id: string;
+  liveAppId?: string;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  repo: string;
+  defaultBranch: string;
+  workflowPath: string;
+  workflowName: string;
+  jobId: string;
+  capabilities: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type GitHubOnboardingPullRequest = {
+  id: string;
+  repoConnectionId: string;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  repo: string;
+  workflowPath: string;
+  baseBranch: string;
+  headBranch: string;
+  pullRequestNumber: number;
+  pullRequestUrl: string;
+  status: string;
+  error: string;
+  createdAt: string;
+  updatedAt: string;
+  mergedAt?: string;
+  closedAt?: string;
+};
+
+type GitHubWorkflowDispatch = {
+  id: string;
+  controlActionId: string;
+  controlActionStatus: string;
+  liveAppId: string;
+  liveAppRepo: string;
+  action: string;
+  repo: string;
+  workflowPath: string;
+  ref: string;
+  gitHubRunId?: number;
+  runUrl: string;
+  status: string;
+  conclusion: string;
+  requestedAt: string;
+  updatedAt: string;
+  completedAt?: string;
 };
 
 type ApiKey = {
@@ -419,8 +513,8 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     let message = `${method} ${path} failed with ${response.status}`;
     try {
-      const payload = (await response.json()) as { detail?: string; title?: string };
-      message = payload.detail ?? payload.title ?? message;
+      const payload = (await response.json()) as { detail?: string; title?: string; errors?: string[] };
+      message = payload.errors?.join(" ") ?? payload.detail ?? payload.title ?? message;
     } catch {
       // Keep the status-derived message.
     }
@@ -484,7 +578,13 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [controlActions, setControlActions] = useState<ControlAction[]>([]);
   const [liveApps, setLiveApps] = useState<LiveApp[]>([]);
+  const [liveAppDeployments, setLiveAppDeployments] = useState<Record<string, LiveAppDeployment[]>>({});
   const [registrationTokens, setRegistrationTokens] = useState<RegistrationToken[]>([]);
+  const [gitHubRepoConnections, setGitHubRepoConnections] = useState<GitHubRepoConnection[]>([]);
+  const [gitHubOnboardingPullRequests, setGitHubOnboardingPullRequests] = useState<GitHubOnboardingPullRequest[]>([]);
+  const [gitHubWorkflowDispatches, setGitHubWorkflowDispatches] = useState<GitHubWorkflowDispatch[]>([]);
+  const [gitHubResolution, setGitHubResolution] = useState<GitHubRepositoryResolution | undefined>();
+  const [gitHubManualSnippet, setGitHubManualSnippet] = useState<string | undefined>();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
   const [featureFlagChanges, setFeatureFlagChanges] = useState<FeatureFlagChange[]>([]);
@@ -512,6 +612,18 @@ export default function App() {
   const [environmentForm, setEnvironmentForm] = useState({ name: "", slug: "" });
   const [inviteForm, setInviteForm] = useState<{ email: string; role: Role }>({ email: "", role: "Developer" });
   const [tokenForm, setTokenForm] = useState({ name: "" });
+  const [gitHubForm, setGitHubForm] = useState({
+    repo: "",
+    workflowPath: "",
+    jobId: "deploy",
+    serviceUrlExpression: "${{ steps.deploy.outputs.service-url }}",
+    healthUrlExpression: "${{ steps.deploy.outputs.health-url }}",
+    versionExpression: "${{ github.sha }}",
+    imageDigestExpression: "${{ steps.deploy.outputs.image-digest }}",
+    capabilities: "health,deployment-events,deploy,redeploy,rollback"
+  });
+  const [appActionReasons, setAppActionReasons] = useState<Record<string, string>>({});
+  const [rollbackTargets, setRollbackTargets] = useState<Record<string, string>>({});
   const [apiKeyForm, setApiKeyForm] = useState({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
   const [flagForm, setFlagForm] = useState({ key: "", name: "", description: "", kind: "FeatureFlag", enabled: false, reason: "" });
   const [flagReasons, setFlagReasons] = useState<Record<string, string>>({});
@@ -546,6 +658,32 @@ export default function App() {
   const canManageFlags = roleAtLeast(selectedOrg?.role, selectedEnvironmentIsProduction ? "Admin" : "Developer");
   const selectedHistoryFlag = featureFlags.find((flag) => flag.id === historyFlagId);
   const filteredLiveApps = liveApps.filter((app) => {
+    if (selectedEnvironmentId) {
+      return app.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? app.projectId === selectedProjectId : true;
+  });
+  const filteredGitHubRepoConnections = gitHubRepoConnections.filter((connection) => {
+    if (selectedEnvironmentId) {
+      return connection.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? connection.projectId === selectedProjectId : true;
+  });
+  const filteredGitHubOnboardingPullRequests = gitHubOnboardingPullRequests.filter((pullRequest) => {
+    if (selectedEnvironmentId) {
+      return pullRequest.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? pullRequest.projectId === selectedProjectId : true;
+  });
+  const filteredGitHubWorkflowDispatches = gitHubWorkflowDispatches.filter((dispatch) => {
+    const app = liveApps.find((candidate) => candidate.id === dispatch.liveAppId);
+    if (!app) {
+      return true;
+    }
+
     if (selectedEnvironmentId) {
       return app.environmentId === selectedEnvironmentId;
     }
@@ -625,7 +763,13 @@ export default function App() {
       setAuditLogs([]);
       setControlActions([]);
       setLiveApps([]);
+      setLiveAppDeployments({});
       setRegistrationTokens([]);
+      setGitHubRepoConnections([]);
+      setGitHubOnboardingPullRequests([]);
+      setGitHubWorkflowDispatches([]);
+      setGitHubResolution(undefined);
+      setGitHubManualSnippet(undefined);
       setApiKeys([]);
       setWebhookEndpoints([]);
       setWebhookDeliveries([]);
@@ -644,9 +788,12 @@ export default function App() {
     }
 
     const selected = me?.organizations.find((organization) => organization.id === organizationId);
-    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, webhookPayload, monitorPayload, incidentPayload, releasePayload, auditPayload, controlActionPayload] = await Promise.all([
+    const [projectPayload, appPayload, repoConnectionPayload, onboardingPullRequestPayload, workflowDispatchPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, webhookPayload, monitorPayload, incidentPayload, releasePayload, auditPayload, controlActionPayload] = await Promise.all([
       api<Project[]>(`/api/organizations/${organizationId}/projects`),
       api<LiveApp[]>(`/api/organizations/${organizationId}/apps`),
+      api<GitHubRepoConnection[]>(`/api/organizations/${organizationId}/github/repo-connections`),
+      api<GitHubOnboardingPullRequest[]>(`/api/organizations/${organizationId}/github/onboarding-prs`),
+      api<GitHubWorkflowDispatch[]>(`/api/organizations/${organizationId}/github/workflow-dispatches`),
       roleAtLeast(selected?.role, "Admin") ? api<Member[]>(`/api/organizations/${organizationId}/members`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<Invitation[]>(`/api/organizations/${organizationId}/invitations`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<RegistrationToken[]>(`/api/organizations/${organizationId}/registration-tokens`) : Promise.resolve([]),
@@ -661,6 +808,9 @@ export default function App() {
 
     setProjects(projectPayload);
     setLiveApps(appPayload);
+    setGitHubRepoConnections(repoConnectionPayload);
+    setGitHubOnboardingPullRequests(onboardingPullRequestPayload);
+    setGitHubWorkflowDispatches(workflowDispatchPayload);
     setMembers(memberPayload);
     setInvitations(invitationPayload);
     setRegistrationTokens(tokenPayload);
@@ -958,6 +1108,111 @@ export default function App() {
       await api(`/api/organizations/${selectedOrgId}/registration-tokens/${token.id}/revoke`, { method: "POST" });
       await refreshOrgData(selectedOrgId);
       setNotice("Registration token revoked.");
+    });
+  }
+
+  async function resolveGitHubRepo(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const resolution = await api<GitHubRepositoryResolution>(
+        `/api/organizations/${selectedOrgId}/github/repositories?repo=${encodeURIComponent(gitHubForm.repo)}`);
+      setGitHubResolution(resolution);
+      setGitHubForm((current) => ({
+        ...current,
+        repo: resolution.fullName,
+        workflowPath: current.workflowPath || resolution.workflows.find((workflow) => workflow.path.endsWith("deploy.yml"))?.path || resolution.workflows[0]?.path || ""
+      }));
+      setNotice("GitHub repository resolved.");
+    });
+  }
+
+  async function createGitHubOnboardingPullRequest(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const response = await fetch(`/api/organizations/${selectedOrgId}/github/onboarding-prs`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRF-TOKEN": await getCsrfToken()
+        },
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          environmentId: selectedEnvironmentId,
+          repo: gitHubForm.repo,
+          workflowPath: gitHubForm.workflowPath,
+          jobId: gitHubForm.jobId,
+          serviceUrlExpression: gitHubForm.serviceUrlExpression,
+          healthUrlExpression: gitHubForm.healthUrlExpression,
+          versionExpression: gitHubForm.versionExpression,
+          imageDigestExpression: gitHubForm.imageDigestExpression,
+          capabilities: gitHubForm.capabilities.split(",").map((capability) => capability.trim()).filter(Boolean)
+        })
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => undefined)) as { errors?: string[]; manualSnippet?: string; detail?: string; title?: string } | undefined;
+        setGitHubManualSnippet(payload?.manualSnippet);
+        throw new Error(payload?.errors?.join(" ") ?? payload?.detail ?? payload?.title ?? `GitHub onboarding PR failed with ${response.status}.`);
+      }
+
+      const pullRequest = (await response.json()) as GitHubOnboardingPullRequest;
+      setGitHubManualSnippet(undefined);
+      await refreshOrgData(selectedOrgId);
+      setNotice(`Onboarding PR #${pullRequest.pullRequestNumber} opened.`);
+    });
+  }
+
+  async function syncGitHubOnboardingPullRequest(pullRequest: GitHubOnboardingPullRequest) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<GitHubOnboardingPullRequest>(`/api/organizations/${selectedOrgId}/github/onboarding-prs/${pullRequest.id}/sync`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setNotice("Onboarding PR synced.");
+    });
+  }
+
+  async function loadAppDeployments(app: LiveApp) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const deployments = await api<LiveAppDeployment[]>(`/api/organizations/${selectedOrgId}/apps/${app.id}/deployments`);
+      setLiveAppDeployments((current) => ({ ...current, [app.id]: deployments }));
+      setRollbackTargets((current) => ({
+        ...current,
+        [app.id]: current[app.id] || deployments.find((deployment) => deployment.id !== deployments[0]?.id)?.id || deployments[0]?.id || ""
+      }));
+      setNotice("Deployment history loaded.");
+    });
+  }
+
+  async function dispatchLiveAppAction(app: LiveApp, action: "deploy" | "redeploy" | "rollback") {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const reason = appActionReasons[app.id] ?? "";
+      const targetDeploymentId = action === "rollback" ? rollbackTargets[app.id] || undefined : undefined;
+      await api<GitHubWorkflowDispatch>(`/api/organizations/${selectedOrgId}/apps/${app.id}/actions/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ reason, targetDeploymentId })
+      });
+      await refreshOrgData(selectedOrgId);
+      setNotice(`${action} workflow dispatched.`);
     });
   }
 
@@ -1554,16 +1809,112 @@ export default function App() {
                       <span>{app.version} / {shortSha(app.currentCommitSha)}</span>
                       <span>{app.imageDigest}</span>
                       <span>{app.capabilities.join(", ")}</span>
+                      {app.gitHubRunUrl ? <a href={app.gitHubRunUrl} target="_blank" rel="noreferrer">Last GitHub run</a> : null}
                       <span>Registered {formatDate(app.lastRegisteredAt)}</span>
                     </div>
                     <div className="actions">
                       <a href={app.serviceUrl} target="_blank" rel="noreferrer">Service</a>
                       <a href={app.healthUrl} target="_blank" rel="noreferrer">Health</a>
+                      {canManageOrg && app.capabilities.some((capability) => ["deploy", "redeploy", "rollback"].includes(capability)) && (
+                        <div className="live-control">
+                          <input placeholder="Action reason" value={appActionReasons[app.id] ?? ""} onChange={(event) => setAppActionReasons({ ...appActionReasons, [app.id]: event.target.value })} />
+                          <div className="actions">
+                            {app.capabilities.includes("deploy") && <button onClick={() => dispatchLiveAppAction(app, "deploy")} disabled={busy}>Deploy</button>}
+                            {app.capabilities.includes("redeploy") && <button onClick={() => dispatchLiveAppAction(app, "redeploy")} disabled={busy}>Redeploy</button>}
+                            {app.capabilities.includes("rollback") && <button onClick={() => loadAppDeployments(app)} disabled={busy}>History</button>}
+                          </div>
+                          {app.capabilities.includes("rollback") && liveAppDeployments[app.id]?.length ? (
+                            <div className="rollback-row">
+                              <select value={rollbackTargets[app.id] ?? ""} onChange={(event) => setRollbackTargets({ ...rollbackTargets, [app.id]: event.target.value })}>
+                                {liveAppDeployments[app.id].map((deployment) => (
+                                  <option value={deployment.id} key={deployment.id}>
+                                    {deployment.version} / {shortSha(deployment.commitSha)} / {formatDate(deployment.registeredAt)}
+                                  </option>
+                                ))}
+                              </select>
+                              <button onClick={() => dispatchLiveAppAction(app, "rollback")} disabled={busy || !rollbackTargets[app.id]}>Rollback</button>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {canManageOrg && (
+              <div className="panel wide">
+                <div className="panel-heading">
+                  <h2>GitHub onboarding</h2>
+                  <span>{filteredGitHubRepoConnections.length}</span>
+                </div>
+                <form className="inline-form github-resolve-form" onSubmit={resolveGitHubRepo}>
+                  <input required placeholder="owner/repo or GitHub URL" value={gitHubForm.repo} onChange={(event) => setGitHubForm({ ...gitHubForm, repo: event.target.value })} />
+                  <button className="primary" disabled={busy}>Resolve</button>
+                </form>
+                {gitHubResolution && (
+                  <div className="github-resolution">
+                    <span>{gitHubResolution.fullName}</span>
+                    <span>{gitHubResolution.defaultBranch}</span>
+                    <a href={gitHubResolution.htmlUrl} target="_blank" rel="noreferrer">Repository</a>
+                  </div>
+                )}
+                {selectedEnvironment && (
+                  <form className="inline-form github-onboarding-form" onSubmit={createGitHubOnboardingPullRequest}>
+                    <select required value={gitHubForm.workflowPath} onChange={(event) => setGitHubForm({ ...gitHubForm, workflowPath: event.target.value })}>
+                      <option value="">Workflow</option>
+                      {gitHubResolution?.workflows.map((workflow) => (
+                        <option value={workflow.path} key={workflow.id}>{workflow.name} / {workflow.path}</option>
+                      ))}
+                    </select>
+                    <input required placeholder="Job id" value={gitHubForm.jobId} onChange={(event) => setGitHubForm({ ...gitHubForm, jobId: event.target.value })} />
+                    <input required placeholder="Service URL expression" value={gitHubForm.serviceUrlExpression} onChange={(event) => setGitHubForm({ ...gitHubForm, serviceUrlExpression: event.target.value })} />
+                    <input required placeholder="Health URL expression" value={gitHubForm.healthUrlExpression} onChange={(event) => setGitHubForm({ ...gitHubForm, healthUrlExpression: event.target.value })} />
+                    <input required placeholder="Version expression" value={gitHubForm.versionExpression} onChange={(event) => setGitHubForm({ ...gitHubForm, versionExpression: event.target.value })} />
+                    <input required placeholder="Image digest expression" value={gitHubForm.imageDigestExpression} onChange={(event) => setGitHubForm({ ...gitHubForm, imageDigestExpression: event.target.value })} />
+                    <input required placeholder="Capabilities" value={gitHubForm.capabilities} onChange={(event) => setGitHubForm({ ...gitHubForm, capabilities: event.target.value })} />
+                    <button className="primary" disabled={busy || !gitHubForm.workflowPath}>Open PR</button>
+                  </form>
+                )}
+                {gitHubManualSnippet && (
+                  <div className="secret-box">
+                    <strong>Manual registration snippet</strong>
+                    <pre>{gitHubManualSnippet}</pre>
+                  </div>
+                )}
+                <div className="table">
+                  {filteredGitHubOnboardingPullRequests.length === 0 ? <p className="empty">No onboarding PRs</p> : null}
+                  {filteredGitHubOnboardingPullRequests.map((pullRequest) => (
+                    <div className="table-row github-pr-row" key={pullRequest.id}>
+                      <div>
+                        <strong>{pullRequest.repo}</strong>
+                        <span>{pullRequest.projectName} / {pullRequest.environmentName}</span>
+                        <span>{pullRequest.workflowPath}</span>
+                        <span>{pullRequest.status}{pullRequest.error ? ` / ${pullRequest.error}` : ""}</span>
+                      </div>
+                      <a href={pullRequest.pullRequestUrl} target="_blank" rel="noreferrer">PR #{pullRequest.pullRequestNumber}</a>
+                      <button onClick={() => syncGitHubOnboardingPullRequest(pullRequest)} disabled={busy}>Sync</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="table">
+                  {filteredGitHubWorkflowDispatches.length === 0 ? <p className="empty">No workflow dispatches</p> : null}
+                  {filteredGitHubWorkflowDispatches.map((dispatch) => (
+                    <div className="table-row github-dispatch-row" key={dispatch.id}>
+                      <div>
+                        <strong>{dispatch.action} / {dispatch.controlActionStatus}</strong>
+                        <span>{dispatch.repo}</span>
+                        <span>{dispatch.workflowPath} @ {dispatch.ref}</span>
+                        <span>{dispatch.status}{dispatch.conclusion ? ` / ${dispatch.conclusion}` : ""}</span>
+                      </div>
+                      <span>{formatDate(dispatch.requestedAt)}</span>
+                      {dispatch.runUrl ? <a href={dispatch.runUrl} target="_blank" rel="noreferrer">Run</a> : <span>-</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {canManageOrg && (
               <div className="panel wide">

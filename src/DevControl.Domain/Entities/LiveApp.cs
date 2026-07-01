@@ -26,6 +26,10 @@ public sealed class LiveApp
 
     public string CapabilitiesJson { get; private set; } = "[]";
 
+    public long? GitHubRunId { get; private set; }
+
+    public string GitHubRunUrl { get; private set; } = string.Empty;
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset LastRegisteredAt { get; private set; }
@@ -46,6 +50,8 @@ public sealed class LiveApp
         string version,
         string imageDigest,
         string capabilitiesJson,
+        long? gitHubRunId,
+        string? gitHubRunUrl,
         DateTimeOffset now)
     {
         Id = Guid.NewGuid();
@@ -53,7 +59,7 @@ public sealed class LiveApp
         ProjectId = projectId;
         EnvironmentId = environmentId;
         CreatedAt = now;
-        UpdateRegistration(repo, normalizedRepo, serviceUrl, healthUrl, commitSha, version, imageDigest, capabilitiesJson, now);
+        UpdateRegistration(repo, normalizedRepo, serviceUrl, healthUrl, commitSha, version, imageDigest, capabilitiesJson, gitHubRunId, gitHubRunUrl, now);
     }
 
     public void UpdateRegistration(
@@ -65,6 +71,8 @@ public sealed class LiveApp
         string version,
         string imageDigest,
         string capabilitiesJson,
+        long? gitHubRunId,
+        string? gitHubRunUrl,
         DateTimeOffset now)
     {
         Repo = Require(repo, nameof(repo));
@@ -75,6 +83,8 @@ public sealed class LiveApp
         Version = Require(version, nameof(version));
         ImageDigest = Require(imageDigest, nameof(imageDigest));
         CapabilitiesJson = string.IsNullOrWhiteSpace(capabilitiesJson) ? "[]" : capabilitiesJson.Trim();
+        GitHubRunId = gitHubRunId;
+        GitHubRunUrl = string.IsNullOrWhiteSpace(gitHubRunUrl) ? string.Empty : gitHubRunUrl.Trim();
         LastRegisteredAt = now;
     }
 

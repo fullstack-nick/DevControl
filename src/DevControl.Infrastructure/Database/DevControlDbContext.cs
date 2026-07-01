@@ -33,6 +33,14 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
 
     public DbSet<RegistrationToken> RegistrationTokens => Set<RegistrationToken>();
 
+    public DbSet<GitHubInstallation> GitHubInstallations => Set<GitHubInstallation>();
+
+    public DbSet<GitHubRepoConnection> GitHubRepoConnections => Set<GitHubRepoConnection>();
+
+    public DbSet<GitHubOnboardingPullRequest> GitHubOnboardingPullRequests => Set<GitHubOnboardingPullRequest>();
+
+    public DbSet<GitHubWorkflowDispatch> GitHubWorkflowDispatches => Set<GitHubWorkflowDispatch>();
+
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
     public DbSet<ApiKeyUsageDaily> ApiKeyUsageDaily => Set<ApiKeyUsageDaily>();
@@ -79,6 +87,10 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
         ConfigureLiveApp(modelBuilder);
         ConfigureLiveAppDeployment(modelBuilder);
         ConfigureRegistrationToken(modelBuilder);
+        ConfigureGitHubInstallation(modelBuilder);
+        ConfigureGitHubRepoConnection(modelBuilder);
+        ConfigureGitHubOnboardingPullRequest(modelBuilder);
+        ConfigureGitHubWorkflowDispatch(modelBuilder);
         ConfigureApiKey(modelBuilder);
         ConfigureApiKeyUsageDaily(modelBuilder);
         ConfigureApiKeyRateLimitWindow(modelBuilder);
@@ -445,6 +457,8 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.Property(liveApp => liveApp.Version).HasColumnName("version").HasMaxLength(120).IsRequired();
             entity.Property(liveApp => liveApp.ImageDigest).HasColumnName("image_digest").HasMaxLength(400).IsRequired();
             entity.Property(liveApp => liveApp.CapabilitiesJson).HasColumnName("capabilities_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(liveApp => liveApp.GitHubRunId).HasColumnName("github_run_id");
+            entity.Property(liveApp => liveApp.GitHubRunUrl).HasColumnName("github_run_url").HasMaxLength(500).IsRequired();
             entity.Property(liveApp => liveApp.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(liveApp => liveApp.LastRegisteredAt).HasColumnName("last_registered_at").IsRequired();
 
@@ -489,10 +503,13 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.Property(deployment => deployment.Version).HasColumnName("version").HasMaxLength(120).IsRequired();
             entity.Property(deployment => deployment.ImageDigest).HasColumnName("image_digest").HasMaxLength(400).IsRequired();
             entity.Property(deployment => deployment.CapabilitiesJson).HasColumnName("capabilities_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(deployment => deployment.GitHubRunId).HasColumnName("github_run_id");
+            entity.Property(deployment => deployment.GitHubRunUrl).HasColumnName("github_run_url").HasMaxLength(500).IsRequired();
             entity.Property(deployment => deployment.RegisteredAt).HasColumnName("registered_at").IsRequired();
 
             entity.HasIndex(deployment => new { deployment.LiveAppId, deployment.RegisteredAt });
             entity.HasIndex(deployment => new { deployment.OrganizationId, deployment.RegisteredAt });
+            entity.HasIndex(deployment => deployment.GitHubRunId);
 
             entity.HasOne<LiveApp>()
                 .WithMany()
@@ -512,6 +529,230 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.HasOne<ProjectEnvironment>()
                 .WithMany()
                 .HasForeignKey(deployment => deployment.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureGitHubInstallation(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GitHubInstallation>(entity =>
+        {
+            entity.ToTable("github_installations");
+            entity.HasKey(installation => installation.Id);
+
+            entity.Property(installation => installation.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(installation => installation.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(installation => installation.InstallationId).HasColumnName("installation_id").IsRequired();
+            entity.Property(installation => installation.AccountLogin).HasColumnName("account_login").HasMaxLength(160).IsRequired();
+            entity.Property(installation => installation.AccountType).HasColumnName("account_type").HasMaxLength(40).IsRequired();
+            entity.Property(installation => installation.RepositorySelection).HasColumnName("repository_selection").HasMaxLength(40).IsRequired();
+            entity.Property(installation => installation.PermissionsJson).HasColumnName("permissions_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(installation => installation.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(installation => installation.UpdatedAt).HasColumnName("updated_at").IsRequired();
+
+            entity.HasIndex(installation => installation.OrganizationId);
+            entity.HasIndex(installation => new { installation.OrganizationId, installation.InstallationId }).IsUnique();
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(installation => installation.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureGitHubRepoConnection(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GitHubRepoConnection>(entity =>
+        {
+            entity.ToTable("github_repo_connections");
+            entity.HasKey(connection => connection.Id);
+
+            entity.Property(connection => connection.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(connection => connection.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(connection => connection.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(connection => connection.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(connection => connection.GitHubInstallationId).HasColumnName("github_installation_id").IsRequired();
+            entity.Property(connection => connection.LiveAppId).HasColumnName("live_app_id");
+            entity.Property(connection => connection.Repo).HasColumnName("repo").HasMaxLength(220).IsRequired();
+            entity.Property(connection => connection.NormalizedRepo).HasColumnName("normalized_repo").HasMaxLength(220).IsRequired();
+            entity.Property(connection => connection.DefaultBranch).HasColumnName("default_branch").HasMaxLength(160).IsRequired();
+            entity.Property(connection => connection.WorkflowPath).HasColumnName("workflow_path").HasMaxLength(300).IsRequired();
+            entity.Property(connection => connection.WorkflowName).HasColumnName("workflow_name").HasMaxLength(160).IsRequired();
+            entity.Property(connection => connection.JobId).HasColumnName("job_id").HasMaxLength(120).IsRequired();
+            entity.Property(connection => connection.ServiceUrlExpression).HasColumnName("service_url_expression").HasMaxLength(500).IsRequired();
+            entity.Property(connection => connection.HealthUrlExpression).HasColumnName("health_url_expression").HasMaxLength(500).IsRequired();
+            entity.Property(connection => connection.VersionExpression).HasColumnName("version_expression").HasMaxLength(200).IsRequired();
+            entity.Property(connection => connection.ImageDigestExpression).HasColumnName("image_digest_expression").HasMaxLength(300).IsRequired();
+            entity.Property(connection => connection.CapabilitiesJson).HasColumnName("capabilities_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(connection => connection.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(connection => connection.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(connection => connection.UpdatedAt).HasColumnName("updated_at").IsRequired();
+
+            entity.HasIndex(connection => connection.OrganizationId);
+            entity.HasIndex(connection => connection.ProjectId);
+            entity.HasIndex(connection => connection.EnvironmentId);
+            entity.HasIndex(connection => connection.GitHubInstallationId);
+            entity.HasIndex(connection => connection.LiveAppId);
+            entity.HasIndex(connection => new { connection.OrganizationId, connection.ProjectId, connection.EnvironmentId, connection.NormalizedRepo }).IsUnique();
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(connection => connection.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(connection => connection.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(connection => connection.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<GitHubInstallation>()
+                .WithMany()
+                .HasForeignKey(connection => connection.GitHubInstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<LiveApp>()
+                .WithMany()
+                .HasForeignKey(connection => connection.LiveAppId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(connection => connection.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureGitHubOnboardingPullRequest(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GitHubOnboardingPullRequest>(entity =>
+        {
+            entity.ToTable("github_onboarding_pull_requests");
+            entity.HasKey(pullRequest => pullRequest.Id);
+
+            entity.Property(pullRequest => pullRequest.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(pullRequest => pullRequest.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(pullRequest => pullRequest.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(pullRequest => pullRequest.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(pullRequest => pullRequest.RepoConnectionId).HasColumnName("repo_connection_id").IsRequired();
+            entity.Property(pullRequest => pullRequest.Repo).HasColumnName("repo").HasMaxLength(220).IsRequired();
+            entity.Property(pullRequest => pullRequest.WorkflowPath).HasColumnName("workflow_path").HasMaxLength(300).IsRequired();
+            entity.Property(pullRequest => pullRequest.BaseBranch).HasColumnName("base_branch").HasMaxLength(160).IsRequired();
+            entity.Property(pullRequest => pullRequest.HeadBranch).HasColumnName("head_branch").HasMaxLength(200).IsRequired();
+            entity.Property(pullRequest => pullRequest.PullRequestNumber).HasColumnName("pull_request_number").IsRequired();
+            entity.Property(pullRequest => pullRequest.PullRequestUrl).HasColumnName("pull_request_url").HasMaxLength(500).IsRequired();
+            entity.Property(pullRequest => pullRequest.Status).HasColumnName("status").HasMaxLength(40).IsRequired();
+            entity.Property(pullRequest => pullRequest.Error).HasColumnName("error").HasMaxLength(1000).IsRequired();
+            entity.Property(pullRequest => pullRequest.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(pullRequest => pullRequest.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(pullRequest => pullRequest.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(pullRequest => pullRequest.MergedAt).HasColumnName("merged_at");
+            entity.Property(pullRequest => pullRequest.ClosedAt).HasColumnName("closed_at");
+
+            entity.HasIndex(pullRequest => pullRequest.OrganizationId);
+            entity.HasIndex(pullRequest => pullRequest.RepoConnectionId);
+            entity.HasIndex(pullRequest => new { pullRequest.OrganizationId, pullRequest.Status, pullRequest.UpdatedAt });
+            entity.HasIndex(pullRequest => new { pullRequest.OrganizationId, pullRequest.Repo, pullRequest.PullRequestNumber }).IsUnique();
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(pullRequest => pullRequest.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(pullRequest => pullRequest.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(pullRequest => pullRequest.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<GitHubRepoConnection>()
+                .WithMany()
+                .HasForeignKey(pullRequest => pullRequest.RepoConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(pullRequest => pullRequest.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureGitHubWorkflowDispatch(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GitHubWorkflowDispatch>(entity =>
+        {
+            entity.ToTable("github_workflow_dispatches");
+            entity.HasKey(dispatch => dispatch.Id);
+
+            entity.Property(dispatch => dispatch.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(dispatch => dispatch.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(dispatch => dispatch.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(dispatch => dispatch.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(dispatch => dispatch.RepoConnectionId).HasColumnName("repo_connection_id").IsRequired();
+            entity.Property(dispatch => dispatch.LiveAppId).HasColumnName("live_app_id").IsRequired();
+            entity.Property(dispatch => dispatch.ControlActionId).HasColumnName("control_action_id").IsRequired();
+            entity.Property(dispatch => dispatch.Action).HasColumnName("action").HasMaxLength(40).IsRequired();
+            entity.Property(dispatch => dispatch.Repo).HasColumnName("repo").HasMaxLength(220).IsRequired();
+            entity.Property(dispatch => dispatch.WorkflowPath).HasColumnName("workflow_path").HasMaxLength(300).IsRequired();
+            entity.Property(dispatch => dispatch.Ref).HasColumnName("ref").HasMaxLength(160).IsRequired();
+            entity.Property(dispatch => dispatch.GitHubRunId).HasColumnName("github_run_id");
+            entity.Property(dispatch => dispatch.RunUrl).HasColumnName("run_url").HasMaxLength(500).IsRequired();
+            entity.Property(dispatch => dispatch.Status).HasColumnName("status").HasMaxLength(40).IsRequired();
+            entity.Property(dispatch => dispatch.Conclusion).HasColumnName("conclusion").HasMaxLength(40).IsRequired();
+            entity.Property(dispatch => dispatch.InputsJson).HasColumnName("inputs_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(dispatch => dispatch.RequestedByUserId).HasColumnName("requested_by_user_id").IsRequired();
+            entity.Property(dispatch => dispatch.RequestedAt).HasColumnName("requested_at").IsRequired();
+            entity.Property(dispatch => dispatch.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(dispatch => dispatch.CompletedAt).HasColumnName("completed_at");
+
+            entity.HasIndex(dispatch => dispatch.OrganizationId);
+            entity.HasIndex(dispatch => dispatch.RepoConnectionId);
+            entity.HasIndex(dispatch => dispatch.LiveAppId);
+            entity.HasIndex(dispatch => dispatch.ControlActionId).IsUnique();
+            entity.HasIndex(dispatch => dispatch.GitHubRunId);
+            entity.HasIndex(dispatch => new { dispatch.OrganizationId, dispatch.CompletedAt, dispatch.UpdatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<GitHubRepoConnection>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.RepoConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<LiveApp>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.LiveAppId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ControlAction>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.ControlActionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(dispatch => dispatch.RequestedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

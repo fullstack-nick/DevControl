@@ -26,6 +26,10 @@ public sealed class LiveAppDeployment
 
     public string CapabilitiesJson { get; private set; } = "[]";
 
+    public long? GitHubRunId { get; private set; }
+
+    public string GitHubRunUrl { get; private set; } = string.Empty;
+
     public DateTimeOffset RegisteredAt { get; private set; }
 
     private LiveAppDeployment()
@@ -44,6 +48,8 @@ public sealed class LiveAppDeployment
         string version,
         string imageDigest,
         string capabilitiesJson,
+        long? gitHubRunId,
+        string? gitHubRunUrl,
         DateTimeOffset now)
     {
         Id = Guid.NewGuid();
@@ -58,6 +64,8 @@ public sealed class LiveAppDeployment
         Version = Require(version, nameof(version));
         ImageDigest = Require(imageDigest, nameof(imageDigest));
         CapabilitiesJson = string.IsNullOrWhiteSpace(capabilitiesJson) ? "[]" : capabilitiesJson.Trim();
+        GitHubRunId = gitHubRunId;
+        GitHubRunUrl = string.IsNullOrWhiteSpace(gitHubRunUrl) ? string.Empty : gitHubRunUrl.Trim();
         RegisteredAt = now;
     }
 

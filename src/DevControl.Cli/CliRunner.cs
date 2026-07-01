@@ -172,8 +172,12 @@ public sealed class CliRunner
         var configuration = await configurationStore.LoadAsync();
         var server = ResolveServer(options, configuration)
             ?? throw new CliUsageException("Server is required. Use --server, DEVCONTROL_SERVER, or devcontrol config set.");
-        var token = ResolveToken(options, configuration)
-            ?? throw new CliUsageException("Token is required. Use --token, DEVCONTROL_TOKEN, or devcontrol config set.");
+        var token = ResolveToken(options, configuration);
+        var gitHubOidcToken = options.Value("github-oidc-token") ?? environment("DEVCONTROL_GITHUB_OIDC_TOKEN");
+        if (string.IsNullOrWhiteSpace(token) && string.IsNullOrWhiteSpace(gitHubOidcToken))
+        {
+            throw new CliUsageException("Registration requires --token, DEVCONTROL_TOKEN, saved config token, --github-oidc-token, or DEVCONTROL_GITHUB_OIDC_TOKEN.");
+        }
 
         var payload = new AppRegisterPayload(
             options.Value("repo") ?? environment("GITHUB_REPOSITORY") ?? throw new CliUsageException("Repo is required. Use --repo or GITHUB_REPOSITORY."),
@@ -183,13 +187,17 @@ public sealed class CliRunner
             options.Value("commit-sha") ?? environment("GITHUB_SHA") ?? throw new CliUsageException("Commit SHA is required. Use --commit-sha or GITHUB_SHA."),
             options.Required("version"),
             options.Required("image-digest"),
-            SplitCapabilities(options.Required("capabilities")));
+            SplitCapabilities(options.Required("capabilities")),
+            string.IsNullOrWhiteSpace(gitHubOidcToken) ? null : gitHubOidcToken.Trim());
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(server.TrimEnd('/') + "/"), "api/apps/register"))
         {
             Content = JsonContent.Create(payload)
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
 
         using var response = await httpClient.SendAsync(request);
         var content = await response.Content.ReadAsStringAsync();
@@ -310,7 +318,7 @@ public sealed class CliRunner
         output.WriteLine("  devcontrol config set --server <url> --token <token>");
         output.WriteLine("  devcontrol config show [--json]");
         output.WriteLine("  devcontrol config clear");
-        output.WriteLine("  devcontrol apps register --environment <slug> --service-url <url> --health-url <url> --version <version> --image-digest <digest> --capabilities <list>");
+        output.WriteLine("  devcontrol apps register --environment <slug> --service-url <url> --health-url <url> --version <version> --image-digest <digest> --capabilities <list> [--github-oidc-token <jwt>]");
         output.WriteLine("  devcontrol admin bootstrap-live-proof --owner-email <email>");
     }
 
@@ -342,7 +350,8 @@ public sealed class CliRunner
         string CommitSha,
         string Version,
         string ImageDigest,
-        IReadOnlyList<string> Capabilities);
+        IReadOnlyList<string> Capabilities,
+        string? GitHubOidcToken);
 
     private sealed record OperatorBootstrapPayload(
         string OwnerEmail,

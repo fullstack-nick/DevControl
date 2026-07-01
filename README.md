@@ -97,6 +97,13 @@ health checks, automatic incident open/recovery, public status pages, and
 manual release notes. See
 [docs/stage-7-monitoring-incidents-status.md](docs/stage-7-monitoring-incidents-status.md).
 
+## Stage 8 GitHub App and Live Control
+
+Stage 8 adds GitHub App installation-token infrastructure, managed repo
+onboarding PRs that install the registration hook with GitHub Actions OIDC, and
+Admin-only `workflow_dispatch` control for deploy, redeploy, and rollback. See
+[docs/stage-8-github-app-live-control.md](docs/stage-8-github-app-live-control.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,

@@ -40,6 +40,11 @@ resource "google_cloud_run_v2_service" "devcontrol" {
       }
 
       env {
+        name  = "ASPNETCORE_FORWARDEDHEADERS_ENABLED"
+        value = "true"
+      }
+
+      env {
         name  = "DEVCONTROL_POSTGRES_HOST"
         value = var.postgres_private_ip
       }
@@ -178,6 +183,30 @@ resource "google_cloud_run_v2_service" "devcontrol" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.github_app_id == "" ? [] : [var.github_app_id]
+
+        content {
+          name  = "DEVCONTROL_GITHUB_APP_ID"
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.github_app_private_key == "" ? [] : [1]
+
+        content {
+          name = "DEVCONTROL_GITHUB_APP_PRIVATE_KEY"
+
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.github_app_private_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       resources {
         limits = {
           cpu    = "1"
@@ -196,7 +225,8 @@ resource "google_cloud_run_v2_service" "devcontrol" {
     google_secret_manager_secret_iam_member.runtime_can_read_scheduler_secret,
     google_secret_manager_secret_iam_member.runtime_can_read_google_oauth_client_secret,
     google_secret_manager_secret_iam_member.runtime_can_read_smtp_password,
-    google_secret_manager_secret_iam_member.runtime_can_read_operator_bootstrap_secret
+    google_secret_manager_secret_iam_member.runtime_can_read_operator_bootstrap_secret,
+    google_secret_manager_secret_iam_member.runtime_can_read_github_app_private_key
   ]
 
   lifecycle {

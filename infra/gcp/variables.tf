@@ -145,6 +145,19 @@ variable "operator_bootstrap_secret" {
   sensitive   = true
 }
 
+variable "github_app_id" {
+  description = "Optional GitHub App ID used for Stage 8 repo onboarding and live control."
+  type        = string
+  default     = ""
+}
+
+variable "github_app_private_key" {
+  description = "Optional GitHub App private key PEM. Stored in Secret Manager when configured."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "smtp_use_starttls" {
   description = "Whether SMTP delivery should use TLS."
   type        = bool
