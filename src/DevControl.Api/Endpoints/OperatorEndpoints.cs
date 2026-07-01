@@ -15,6 +15,8 @@ public static class OperatorEndpoints
     private const int DefaultApiKeyRateLimitPerMinute = 10;
     private const string BootstrapTokenName = "Operator bootstrap registration token";
     private const string BootstrapApiKeyName = "Operator bootstrap API key";
+    private const string BootstrapFeatureFlagKey = "checkout.enabled";
+    private const string BootstrapKillSwitchKey = "checkout.kill";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static void MapOperatorEndpoints(this WebApplication app)
@@ -202,6 +204,8 @@ public static class OperatorEndpoints
             project.Id,
             environment.Id);
 
+        await UpsertStage5ProofFlagsAsync(dbContext, auditLogWriter, actor, organization.Id, project.Id, environment.Id, user.Id, now, cancellationToken);
+
         var controlAction = new ControlAction(
             organization.Id,
             project.Id,
@@ -308,6 +312,142 @@ public static class OperatorEndpoints
         }
 
         return tokens.Select(token => token.Id).ToArray();
+    }
+
+    private static async Task UpsertStage5ProofFlagsAsync(
+        DevControlDbContext dbContext,
+        AuditLogWriter auditLogWriter,
+        CurrentUser actor,
+        Guid organizationId,
+        Guid projectId,
+        Guid environmentId,
+        Guid userId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await UpsertStage5ProofFlagAsync(
+            dbContext,
+            auditLogWriter,
+            actor,
+            organizationId,
+            projectId,
+            environmentId,
+            userId,
+            BootstrapFeatureFlagKey,
+            "Checkout enabled",
+            "Stage 5 proof feature flag consumed by the sample app SDK.",
+            FeatureFlagKind.FeatureFlag,
+            isEnabled: true,
+            "Stage 5 live proof enables the checkout feature flag.",
+            now,
+            cancellationToken);
+
+        await UpsertStage5ProofFlagAsync(
+            dbContext,
+            auditLogWriter,
+            actor,
+            organizationId,
+            projectId,
+            environmentId,
+            userId,
+            BootstrapKillSwitchKey,
+            "Checkout kill switch",
+            "Stage 5 proof kill switch consumed by the sample app SDK.",
+            FeatureFlagKind.KillSwitch,
+            isEnabled: false,
+            "Stage 5 live proof keeps the checkout kill switch inactive.",
+            now,
+            cancellationToken);
+    }
+
+    private static async Task UpsertStage5ProofFlagAsync(
+        DevControlDbContext dbContext,
+        AuditLogWriter auditLogWriter,
+        CurrentUser actor,
+        Guid organizationId,
+        Guid projectId,
+        Guid environmentId,
+        Guid userId,
+        string key,
+        string name,
+        string description,
+        FeatureFlagKind kind,
+        bool isEnabled,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var flag = await dbContext.FeatureFlags
+            .SingleOrDefaultAsync(
+                candidate =>
+                    candidate.OrganizationId == organizationId &&
+                    candidate.ProjectId == projectId &&
+                    candidate.EnvironmentId == environmentId &&
+                    candidate.Key == key,
+                cancellationToken);
+
+        var action = flag is null ? "feature_flag.create" : "feature_flag.update";
+        var oldValue = flag?.IsEnabled ?? false;
+        if (flag is null)
+        {
+            flag = new FeatureFlag(
+                organizationId,
+                projectId,
+                environmentId,
+                key,
+                name,
+                description,
+                kind,
+                isEnabled,
+                userId,
+                now);
+            dbContext.FeatureFlags.Add(flag);
+        }
+        else
+        {
+            flag.Update(name, description, isEnabled, userId, now);
+        }
+
+        dbContext.FeatureFlagChanges.Add(new FeatureFlagChange(
+            flag.Id,
+            organizationId,
+            projectId,
+            environmentId,
+            oldValue,
+            isEnabled,
+            reason,
+            userId,
+            now));
+
+        var controlAction = new ControlAction(
+            organizationId,
+            projectId,
+            environmentId,
+            action,
+            userId,
+            "feature_flag",
+            flag.Id.ToString(),
+            JsonSerializer.Serialize(new { flag.Id, flag.Key, flag.Kind, bootstrap = true }, JsonOptions),
+            now);
+        controlAction.MarkStarted(now);
+        controlAction.MarkCompleted(
+            ControlActionStatus.Succeeded,
+            JsonSerializer.Serialize(new { flag.Id, flag.Key, flag.Kind, oldValue, newValue = isEnabled, reason, bootstrap = true }, JsonOptions),
+            null,
+            now);
+        dbContext.ControlActions.Add(controlAction);
+
+        auditLogWriter.Add(
+            organizationId,
+            actor,
+            action,
+            "Succeeded",
+            "feature_flag",
+            flag.Id.ToString(),
+            "Stage 5 proof flag changed by operator bootstrap.",
+            new { bootstrap = true, flag.Key, flag.Name, flag.Kind, oldValue, newValue = isEnabled, reason },
+            projectId,
+            environmentId);
     }
 
     private static async Task<IReadOnlyList<Guid>> RevokePriorApiKeysAsync(
