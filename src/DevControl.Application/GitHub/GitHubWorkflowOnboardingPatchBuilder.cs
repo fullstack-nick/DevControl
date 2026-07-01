@@ -46,7 +46,8 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         }
 
         normalized = EnsureIdTokenPermission(normalized);
-        var block = BuildBlock(request);
+        var shouldInstallCli = !JobContainsSetupDevControl(normalized, request.JobId);
+        var block = BuildBlock(request, shouldInstallCli);
 
         var markerStart = normalized.IndexOf(StartMarker, StringComparison.Ordinal);
         if (markerStart >= 0)
@@ -193,6 +194,31 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         return -1;
     }
 
+    private static bool JobContainsSetupDevControl(string content, string jobId)
+    {
+        var lines = content.Split('\n');
+        var jobStart = FindJobStart(lines, jobId);
+        if (jobStart < 0)
+        {
+            return false;
+        }
+
+        for (var i = jobStart + 1; i < lines.Length; i++)
+        {
+            if (TopLevelJobRegex().IsMatch(lines[i]))
+            {
+                return false;
+            }
+
+            if (lines[i].Contains("fullstack-nick/DevControl/.github/actions/setup-devcontrol@", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static int LineOffset(IReadOnlyList<string> lines, int lineIndex)
     {
         var offset = 0;
@@ -262,7 +288,7 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         return next;
     }
 
-    private static string BuildBlock(GitHubWorkflowOnboardingRequest request)
+    private static string BuildBlock(GitHubWorkflowOnboardingRequest request, bool includeCliInstall)
     {
         var serverUrl = EscapeShell(request.ServerUrl.TrimEnd('/'));
         var audience = EscapeShell(request.Audience);
@@ -271,9 +297,13 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
 
         var builder = new StringBuilder();
         builder.AppendLine($"      {StartMarker}");
-        builder.AppendLine("      - name: Install DevControl CLI");
-        builder.AppendLine("        uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main");
-        builder.AppendLine();
+        if (includeCliInstall)
+        {
+            builder.AppendLine("      - name: Install DevControl CLI");
+            builder.AppendLine("        uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main");
+            builder.AppendLine();
+        }
+
         builder.AppendLine("      - name: Request DevControl OIDC token");
         builder.AppendLine("        uses: actions/github-script@v8");
         builder.AppendLine("        id: devcontrol_oidc");
