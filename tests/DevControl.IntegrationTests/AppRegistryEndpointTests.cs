@@ -204,6 +204,10 @@ public sealed partial class AppRegistryEndpointTests
             var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
             await dbContext.Database.ExecuteSqlRawAsync("""
                 DROP TABLE IF EXISTS
+                    github_workflow_dispatches,
+                    github_onboarding_pull_requests,
+                    github_repo_connections,
+                    github_installations,
                     incident_monitors,
                     incident_updates,
                     monitor_checks,
