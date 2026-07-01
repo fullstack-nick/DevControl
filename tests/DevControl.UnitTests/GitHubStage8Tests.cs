@@ -88,6 +88,52 @@ public sealed class GitHubStage8Tests
     }
 
     [Fact]
+    public void OnboardingPatch_ReplacesUnmarkedExistingDevControlRegistrationStep()
+    {
+        const string workflow = """
+                                name: Deploy
+                                on:
+                                  workflow_dispatch:
+                                permissions:
+                                  contents: read
+                                  id-token: write
+                                jobs:
+                                  deploy:
+                                    runs-on: ubuntu-latest
+                                    steps:
+                                      - uses: actions/checkout@v4
+                                      - name: Register in DevControl
+                                        env:
+                                          DEVCONTROL_TOKEN: ${{ secrets.DEVCONTROL_TOKEN }}
+                                        run: |
+                                          devcontrol apps register \
+                                            --environment production \
+                                            --service-url "$SERVICE_URL" \
+                                            --health-url "$SERVICE_URL/health" \
+                                            --capabilities health,deployment-events \
+                                            --json
+                                """;
+
+        var result = GitHubWorkflowOnboardingPatchBuilder.Build(new GitHubWorkflowOnboardingRequest(
+            workflow,
+            "deploy",
+            "https://devcontrol.example.com",
+            "https://devcontrol.example.com/api/apps/register",
+            "production",
+            "$SERVICE_URL",
+            "$SERVICE_URL/health",
+            "${{ github.sha }}",
+            "$IMAGE_DIGEST",
+            "health,deployment-events,deploy"));
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.DoesNotContain("DEVCONTROL_TOKEN", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("secrets.DEVCONTROL_TOKEN", result.Content, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(result.Content, "devcontrol apps register"));
+        Assert.Contains("DEVCONTROL_GITHUB_OIDC_TOKEN", result.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OnboardingPatch_FailsWhenJobStepsCannotBeFound()
     {
         const string workflow = """

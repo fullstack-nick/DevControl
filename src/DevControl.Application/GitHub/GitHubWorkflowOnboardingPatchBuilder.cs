@@ -65,6 +65,13 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
             return GitHubWorkflowOnboardingResult.Success(replaced);
         }
 
+        var existingRegistrationStep = FindExistingRegistrationStep(normalized, request.JobId);
+        if (existingRegistrationStep is not null)
+        {
+            var replaced = normalized[..existingRegistrationStep.Start] + block + normalized[existingRegistrationStep.End..];
+            return GitHubWorkflowOnboardingResult.Success(replaced);
+        }
+
         var insertion = FindStepsInsertion(normalized, request.JobId);
         if (insertion is null)
         {
@@ -113,6 +120,88 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         }
 
         return null;
+    }
+
+    private static TextRange? FindExistingRegistrationStep(string content, string jobId)
+    {
+        var lines = content.Split('\n');
+        var jobStart = FindJobStart(lines, jobId);
+        if (jobStart < 0)
+        {
+            return null;
+        }
+
+        var stepsStart = -1;
+        for (var i = jobStart + 1; i < lines.Length; i++)
+        {
+            if (TopLevelJobRegex().IsMatch(lines[i]))
+            {
+                return null;
+            }
+
+            if (Regex.IsMatch(lines[i], "^    steps:\\s*$"))
+            {
+                stepsStart = i;
+                break;
+            }
+        }
+
+        if (stepsStart < 0)
+        {
+            return null;
+        }
+
+        var currentStepStart = -1;
+        for (var i = stepsStart + 1; i < lines.Length; i++)
+        {
+            if (TopLevelJobRegex().IsMatch(lines[i]))
+            {
+                return null;
+            }
+
+            if (Regex.IsMatch(lines[i], "^      -\\s"))
+            {
+                currentStepStart = i;
+            }
+
+            if (currentStepStart >= 0 && lines[i].Contains("devcontrol apps register", StringComparison.Ordinal))
+            {
+                var end = i + 1;
+                while (end < lines.Length && !Regex.IsMatch(lines[end], "^      -\\s") && !TopLevelJobRegex().IsMatch(lines[end]))
+                {
+                    end++;
+                }
+
+                var endOffset = end >= lines.Length ? content.Length : LineOffset(lines, end);
+                return new TextRange(LineOffset(lines, currentStepStart), endOffset);
+            }
+        }
+
+        return null;
+    }
+
+    private static int FindJobStart(IReadOnlyList<string> lines, string jobId)
+    {
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (Regex.IsMatch(lines[i], $"^  {Regex.Escape(jobId)}:\\s*$"))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int LineOffset(IReadOnlyList<string> lines, int lineIndex)
+    {
+        var offset = 0;
+        for (var i = 0; i < lineIndex && i < lines.Count; i++)
+        {
+            offset += lines[i].Length + 1;
+        }
+
+        return offset;
     }
 
     private static string EnsureIdTokenPermission(string content)
@@ -228,4 +317,6 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
 
     [GeneratedRegex("^permissions:[ \\t]*\\S+", RegexOptions.Multiline)]
     private static partial Regex ScalarPermissionsRegex();
+
+    private sealed record TextRange(int Start, int End);
 }
