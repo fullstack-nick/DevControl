@@ -89,6 +89,7 @@ public sealed partial class MonitoringEndpointTests
         Assert.Single(downStatus.Incidents);
         Assert.Single(downStatus.Incidents[0].Updates);
 
+        await MakeMonitorDueAsync(factory, monitor.Id);
         factory.Outbound.Enqueue(new SafeOutboundResponse(SafeOutboundResultKind.Completed, HttpStatusCode.OK, "ok", false, 2, null, TimeSpan.FromMilliseconds(4)));
         factory.Outbound.Enqueue(new SafeOutboundResponse(SafeOutboundResultKind.Completed, HttpStatusCode.OK, "monitor recovered", false, 18, null, TimeSpan.FromMilliseconds(5)));
         factory.Outbound.Enqueue(new SafeOutboundResponse(SafeOutboundResultKind.Completed, HttpStatusCode.OK, "incident resolved", false, 18, null, TimeSpan.FromMilliseconds(5)));
@@ -205,6 +206,16 @@ public sealed partial class MonitoringEndpointTests
         schedulerRequest.Headers.Add("X-DevControl-Scheduler-Secret", DevControlStage7Factory.SchedulerSecret);
         var schedulerResponse = await client.SendAsync(schedulerRequest);
         schedulerResponse.EnsureSuccessStatusCode();
+    }
+
+    private static async Task MakeMonitorDueAsync(DevControlStage7Factory factory, Guid monitorId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
+        await dbContext.UptimeMonitors
+            .Where(monitor => monitor.Id == monitorId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(monitor => monitor.NextCheckAt, DateTimeOffset.UtcNow.AddSeconds(-1)));
     }
 
     private static async Task<(MeDto Me, OrganizationDto Organization, ProjectDto Project, EnvironmentDto Environment)> CreateTenantAsync(HttpClient client)
