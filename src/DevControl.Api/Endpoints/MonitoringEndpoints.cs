@@ -229,8 +229,7 @@ public static class MonitoringEndpoints
             return failure;
         }
 
-        var incidents = await QueryIncidentResponses(dbContext, organizationId)
-            .OrderByDescending(incident => incident.CreatedAt)
+        var incidents = await QueryIncidentResponses(dbContext, organizationId, latestFirst: true)
             .Take(50)
             .ToListAsync(cancellationToken);
 
@@ -357,7 +356,7 @@ public static class MonitoringEndpoints
         await PublishIncidentEventAsync(webhookEventPublisher, incident.Status == IncidentStatus.Resolved ? WebhookEventTypes.IncidentResolved : WebhookEventTypes.IncidentUpdated, incident, actor, now, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var response = await QueryIncidentResponses(dbContext, organizationId).SingleAsync(candidate => candidate.Id == incident.Id, cancellationToken);
+        var response = await QueryIncidentResponses(dbContext, organizationId, incident.Id).SingleAsync(cancellationToken);
         return Results.Ok(response);
     }
 
@@ -382,8 +381,7 @@ public static class MonitoringEndpoints
             return Results.NotFound();
         }
 
-        var updates = await QueryIncidentUpdateResponses(dbContext, organizationId, incidentId, publicOnly: false)
-            .OrderByDescending(update => update.CreatedAt)
+        var updates = await QueryIncidentUpdateResponses(dbContext, organizationId, incidentId, publicOnly: false, latestFirst: true)
             .ToListAsync(cancellationToken);
         return Results.Ok(updates);
     }
@@ -458,8 +456,7 @@ public static class MonitoringEndpoints
             return failure;
         }
 
-        var releases = await QueryReleaseResponses(dbContext, organizationId)
-            .OrderByDescending(release => release.CreatedAt)
+        var releases = await QueryReleaseResponses(dbContext, organizationId, latestFirst: true)
             .Take(50)
             .ToListAsync(cancellationToken);
         return Results.Ok(releases);
@@ -550,7 +547,7 @@ public static class MonitoringEndpoints
         AddCompletedControlAction(dbContext, organizationId, release.ProjectId, release.EnvironmentId, actor, "release.update", "status_release", release.Id.ToString(), request, new { release.Id, release.Status }, now);
         auditLogWriter.Add(organizationId, actor, "release.update", "Succeeded", "status_release", release.Id.ToString(), "Release draft updated.", new { release.Title, release.Version }, release.ProjectId, release.EnvironmentId);
         await dbContext.SaveChangesAsync(cancellationToken);
-        var response = await QueryReleaseResponses(dbContext, organizationId).SingleAsync(candidate => candidate.Id == release.Id, cancellationToken);
+        var response = await QueryReleaseResponses(dbContext, organizationId, release.Id).SingleAsync(cancellationToken);
         return Results.Ok(response);
     }
 
@@ -597,7 +594,7 @@ public static class MonitoringEndpoints
             cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        var response = await QueryReleaseResponses(dbContext, organizationId).SingleAsync(candidate => candidate.Id == release.Id, cancellationToken);
+        var response = await QueryReleaseResponses(dbContext, organizationId, release.Id).SingleAsync(cancellationToken);
         return Results.Ok(response);
     }
 
@@ -679,16 +676,26 @@ public static class MonitoringEndpoints
                 dbContext.ProjectEnvironments,
                 release => release.EnvironmentId,
                 env => env.Id,
-                (release, env) => new PublicReleaseResponse(
+                (release, env) => new
+                {
                     release.Id,
                     release.Title,
                     release.Version,
                     release.Body,
-                    env.Name,
-                    env.Slug,
-                    release.PublishedAt!.Value))
+                    EnvironmentName = env.Name,
+                    EnvironmentSlug = env.Slug,
+                    release.PublishedAt
+                })
             .OrderByDescending(release => release.PublishedAt)
             .Take(20)
+            .Select(release => new PublicReleaseResponse(
+                release.Id,
+                release.Title,
+                release.Version,
+                release.Body,
+                release.EnvironmentName,
+                release.EnvironmentSlug,
+                release.PublishedAt!.Value))
             .ToListAsync(cancellationToken);
 
         var overall = publicMonitors.Any(monitor => monitor.Status == MonitorStatus.Down.ToString())
@@ -733,8 +740,7 @@ public static class MonitoringEndpoints
         var result = new List<PublicIncidentResponse>();
         foreach (var row in incidents)
         {
-            var updates = await QueryIncidentUpdateResponses(dbContext, organizationId, row.incident.Id, publicOnly: true)
-                .OrderBy(update => update.CreatedAt)
+            var updates = await QueryIncidentUpdateResponses(dbContext, organizationId, row.incident.Id, publicOnly: true, oldestFirst: true)
                 .ToListAsync(cancellationToken);
             result.Add(new PublicIncidentResponse(
                 row.incident.Id,
@@ -988,34 +994,70 @@ public static class MonitoringEndpoints
             monitor.UpdatedAt));
     }
 
-    private static IQueryable<IncidentResponse> QueryIncidentResponses(DevControlDbContext dbContext, Guid organizationId)
+    private static IQueryable<IncidentResponse> QueryIncidentResponses(
+        DevControlDbContext dbContext,
+        Guid organizationId,
+        Guid? incidentId = null,
+        bool latestFirst = false)
     {
-        return dbContext.Incidents
-            .Where(incident => incident.OrganizationId == organizationId)
+        var incidents = dbContext.Incidents
+            .Where(incident => incident.OrganizationId == organizationId);
+        if (incidentId is { } id)
+        {
+            incidents = incidents.Where(incident => incident.Id == id);
+        }
+
+        var query = incidents
             .Join(dbContext.Projects, incident => incident.ProjectId, project => project.Id, (incident, project) => new { incident, project })
-            .Join(dbContext.ProjectEnvironments, candidate => candidate.incident.EnvironmentId, environment => environment.Id, (candidate, environment) => new IncidentResponse(
+            .Join(dbContext.ProjectEnvironments, candidate => candidate.incident.EnvironmentId, environment => environment.Id, (candidate, environment) => new
+            {
                 candidate.incident.Id,
                 candidate.incident.Title,
-                candidate.incident.Status.ToString(),
+                candidate.incident.Status,
                 candidate.incident.Summary,
                 candidate.incident.RootCauseSummary,
                 candidate.incident.PostmortemDraft,
                 candidate.incident.ProjectId,
-                candidate.project.Name,
-                candidate.project.Slug,
+                ProjectName = candidate.project.Name,
+                ProjectSlug = candidate.project.Slug,
                 candidate.incident.EnvironmentId,
-                environment.Name,
-                environment.Slug,
+                EnvironmentName = environment.Name,
+                EnvironmentSlug = environment.Slug,
                 candidate.incident.CreatedAt,
                 candidate.incident.UpdatedAt,
-                candidate.incident.ResolvedAt));
+                candidate.incident.ResolvedAt
+            });
+
+        if (latestFirst)
+        {
+            query = query.OrderByDescending(incident => incident.CreatedAt);
+        }
+
+        return query.Select(incident => new IncidentResponse(
+            incident.Id,
+            incident.Title,
+            incident.Status.ToString(),
+            incident.Summary,
+            incident.RootCauseSummary,
+            incident.PostmortemDraft,
+            incident.ProjectId,
+            incident.ProjectName,
+            incident.ProjectSlug,
+            incident.EnvironmentId,
+            incident.EnvironmentName,
+            incident.EnvironmentSlug,
+            incident.CreatedAt,
+            incident.UpdatedAt,
+            incident.ResolvedAt));
     }
 
     private static IQueryable<IncidentUpdateResponse> QueryIncidentUpdateResponses(
         DevControlDbContext dbContext,
         Guid organizationId,
         Guid incidentId,
-        bool publicOnly)
+        bool publicOnly,
+        bool latestFirst = false,
+        bool oldestFirst = false)
     {
         var updates = dbContext.IncidentUpdates
             .Where(update => update.OrganizationId == organizationId && update.IncidentId == incidentId);
@@ -1024,7 +1066,27 @@ public static class MonitoringEndpoints
             updates = updates.Where(update => update.Visibility == IncidentUpdateVisibility.Public);
         }
 
-        return updates.Select(update => new IncidentUpdateResponse(
+        var query = updates.Select(update => new
+        {
+            update.Id,
+            update.IncidentId,
+            update.Status,
+            update.Visibility,
+            update.Message,
+            update.CreatedByEmail,
+            update.CreatedAt
+        });
+
+        if (latestFirst)
+        {
+            query = query.OrderByDescending(update => update.CreatedAt);
+        }
+        else if (oldestFirst)
+        {
+            query = query.OrderBy(update => update.CreatedAt);
+        }
+
+        return query.Select(update => new IncidentUpdateResponse(
             update.Id,
             update.IncidentId,
             update.Status.ToString(),
@@ -1034,26 +1096,59 @@ public static class MonitoringEndpoints
             update.CreatedAt));
     }
 
-    private static IQueryable<ReleaseResponse> QueryReleaseResponses(DevControlDbContext dbContext, Guid organizationId)
+    private static IQueryable<ReleaseResponse> QueryReleaseResponses(
+        DevControlDbContext dbContext,
+        Guid organizationId,
+        Guid? releaseId = null,
+        bool latestFirst = false)
     {
-        return dbContext.StatusReleases
-            .Where(release => release.OrganizationId == organizationId)
+        var releases = dbContext.StatusReleases
+            .Where(release => release.OrganizationId == organizationId);
+        if (releaseId is { } id)
+        {
+            releases = releases.Where(release => release.Id == id);
+        }
+
+        var query = releases
             .Join(dbContext.Projects, release => release.ProjectId, project => project.Id, (release, project) => new { release, project })
-            .Join(dbContext.ProjectEnvironments, candidate => candidate.release.EnvironmentId, environment => environment.Id, (candidate, environment) => new ReleaseResponse(
+            .Join(dbContext.ProjectEnvironments, candidate => candidate.release.EnvironmentId, environment => environment.Id, (candidate, environment) => new
+            {
                 candidate.release.Id,
                 candidate.release.Title,
                 candidate.release.Version,
                 candidate.release.Body,
-                candidate.release.Status.ToString(),
+                candidate.release.Status,
                 candidate.release.ProjectId,
-                candidate.project.Name,
-                candidate.project.Slug,
+                ProjectName = candidate.project.Name,
+                ProjectSlug = candidate.project.Slug,
                 candidate.release.EnvironmentId,
-                environment.Name,
-                environment.Slug,
+                EnvironmentName = environment.Name,
+                EnvironmentSlug = environment.Slug,
                 candidate.release.CreatedAt,
                 candidate.release.UpdatedAt,
-                candidate.release.PublishedAt));
+                candidate.release.PublishedAt
+            });
+
+        if (latestFirst)
+        {
+            query = query.OrderByDescending(release => release.CreatedAt);
+        }
+
+        return query.Select(release => new ReleaseResponse(
+            release.Id,
+            release.Title,
+            release.Version,
+            release.Body,
+            release.Status.ToString(),
+            release.ProjectId,
+            release.ProjectName,
+            release.ProjectSlug,
+            release.EnvironmentId,
+            release.EnvironmentName,
+            release.EnvironmentSlug,
+            release.CreatedAt,
+            release.UpdatedAt,
+            release.PublishedAt));
     }
 
     private static async Task<ScopedEnvironment?> LoadScopedEnvironmentAsync(
