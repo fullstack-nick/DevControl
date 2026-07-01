@@ -349,6 +349,55 @@ label {
   grid-template-columns: minmax(0, 1fr) minmax(160px, 0.4fr) 120px auto;
 }
 
+.flag-row {
+  grid-template-columns: minmax(0, 1fr) 100px minmax(260px, 0.9fr);
+  align-items: start;
+}
+
+.flag-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.status-on,
+.status-off {
+  font-weight: 800;
+}
+
+.status-on {
+  color: #0f5f43 !important;
+}
+
+.status-off {
+  color: #7b1d2a !important;
+}
+
+.flag-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e8edf4;
+}
+
+.flag-form {
+  grid-template-columns: minmax(150px, 0.7fr) minmax(150px, 0.8fr) minmax(180px, 1fr) 140px 110px minmax(180px, 1fr) auto;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: #38465a;
+}
+
+.checkbox-row input {
+  min-height: auto;
+  width: auto;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -397,6 +446,7 @@ label {
   .workspace-grid,
   .inline-form,
   .table-row,
+  .flag-controls,
   .audit-row {
     grid-template-columns: 1fr;
   }

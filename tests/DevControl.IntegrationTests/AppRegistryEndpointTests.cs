@@ -204,6 +204,8 @@ public sealed partial class AppRegistryEndpointTests
             var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
             await dbContext.Database.ExecuteSqlRawAsync("""
                 DROP TABLE IF EXISTS
+                    feature_flag_changes,
+                    feature_flags,
                     api_key_rate_limit_windows,
                     api_key_usage_daily,
                     api_keys,

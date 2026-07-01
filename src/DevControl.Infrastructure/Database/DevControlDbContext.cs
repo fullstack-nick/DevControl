@@ -39,6 +39,10 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
 
     public DbSet<ApiKeyRateLimitWindow> ApiKeyRateLimitWindows => Set<ApiKeyRateLimitWindow>();
 
+    public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
+
+    public DbSet<FeatureFlagChange> FeatureFlagChanges => Set<FeatureFlagChange>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -58,6 +62,8 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
         ConfigureApiKey(modelBuilder);
         ConfigureApiKeyUsageDaily(modelBuilder);
         ConfigureApiKeyRateLimitWindow(modelBuilder);
+        ConfigureFeatureFlag(modelBuilder);
+        ConfigureFeatureFlagChange(modelBuilder);
         ConfigureDataProtectionKey(modelBuilder);
     }
 
@@ -666,6 +672,114 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.HasOne<ApiKey>()
                 .WithMany()
                 .HasForeignKey(window => window.ApiKeyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureFeatureFlag(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FeatureFlag>(entity =>
+        {
+            entity.ToTable("feature_flags");
+            entity.HasKey(flag => flag.Id);
+
+            entity.Property(flag => flag.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(flag => flag.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(flag => flag.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(flag => flag.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(flag => flag.Key).HasColumnName("key").HasMaxLength(120).IsRequired();
+            entity.Property(flag => flag.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(flag => flag.Description).HasColumnName("description").HasMaxLength(1000).IsRequired();
+            entity.Property(flag => flag.Kind)
+                .HasColumnName("kind")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(flag => flag.IsEnabled).HasColumnName("is_enabled").IsRequired();
+            entity.Property(flag => flag.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(flag => flag.LastChangedByUserId).HasColumnName("last_changed_by_user_id").IsRequired();
+            entity.Property(flag => flag.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(flag => flag.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(flag => flag.LastChangedAt).HasColumnName("last_changed_at").IsRequired();
+
+            entity.HasIndex(flag => flag.OrganizationId);
+            entity.HasIndex(flag => flag.ProjectId);
+            entity.HasIndex(flag => flag.EnvironmentId);
+            entity.HasIndex(flag => new { flag.OrganizationId, flag.ProjectId, flag.EnvironmentId, flag.Key }).IsUnique();
+            entity.HasIndex(flag => new { flag.EnvironmentId, flag.Kind });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(flag => flag.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(flag => flag.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(flag => flag.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(flag => flag.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(flag => flag.LastChangedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureFeatureFlagChange(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FeatureFlagChange>(entity =>
+        {
+            entity.ToTable("feature_flag_changes");
+            entity.HasKey(change => change.Id);
+
+            entity.Property(change => change.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(change => change.FeatureFlagId).HasColumnName("feature_flag_id").IsRequired();
+            entity.Property(change => change.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(change => change.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(change => change.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(change => change.OldValue).HasColumnName("old_value").IsRequired();
+            entity.Property(change => change.NewValue).HasColumnName("new_value").IsRequired();
+            entity.Property(change => change.Reason).HasColumnName("reason").HasMaxLength(1000).IsRequired();
+            entity.Property(change => change.ChangedByUserId).HasColumnName("changed_by_user_id").IsRequired();
+            entity.Property(change => change.ChangedAt).HasColumnName("changed_at").IsRequired();
+
+            entity.HasIndex(change => change.FeatureFlagId);
+            entity.HasIndex(change => new { change.OrganizationId, change.ChangedAt });
+            entity.HasIndex(change => new { change.EnvironmentId, change.ChangedAt });
+
+            entity.HasOne<FeatureFlag>()
+                .WithMany()
+                .HasForeignKey(change => change.FeatureFlagId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(change => change.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(change => change.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(change => change.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(change => change.ChangedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

@@ -176,7 +176,7 @@ public static class OperatorEndpoints
             project.Id,
             environment.Id);
 
-        _ = ApiKeyScopes.TryNormalize([ApiKeyScopes.SampleRead], out var scopes, out var scopesJson, out _);
+        _ = ApiKeyScopes.TryNormalize([ApiKeyScopes.SampleRead, ApiKeyScopes.FlagsRead], out var scopes, out var scopesJson, out _);
         var apiKeySecret = apiKeySecretService.CreateKey();
         var apiKey = new ApiKey(
             organization.Id,

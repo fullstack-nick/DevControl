@@ -18,5 +18,6 @@
     <ProjectReference Include="..\..\src\DevControl.Application\DevControl.Application.csproj" />
     <ProjectReference Include="..\..\src\DevControl.Cli\DevControl.Cli.csproj" />
     <ProjectReference Include="..\..\src\DevControl.Infrastructure\DevControl.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\DevControl.Sdk\DevControl.Sdk.csproj" />
   </ItemGroup>
 </Project>

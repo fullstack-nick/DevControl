@@ -136,7 +136,7 @@ public sealed class CliRunnerTests
                     project = new { id = Guid.NewGuid(), name = "Sample App", slug = "sample-app" },
                     environment = new { id = Guid.NewGuid(), name = "Production", slug = "production" },
                     registrationToken = new { id = Guid.NewGuid(), name = "Operator bootstrap registration token", tokenPrefix = "dcr_prefix", scope = "apps:register", secret = "dcr_show_once" },
-                    apiKey = new { id = Guid.NewGuid(), name = "Operator bootstrap API key", keyPrefix = "dck_prefix", scopes = new[] { "sample:read" }, rateLimitPerMinute = 10, secret = "dck_show_once" },
+                    apiKey = new { id = Guid.NewGuid(), name = "Operator bootstrap API key", keyPrefix = "dck_prefix", scopes = new[] { "flags:read", "sample:read" }, rateLimitPerMinute = 10, secret = "dck_show_once" },
                     revokedRegistrationTokenIds = Array.Empty<Guid>(),
                     revokedApiKeyIds = Array.Empty<Guid>()
                 });

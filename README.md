@@ -77,6 +77,13 @@ revocation/rotation, fixed-window rate limiting, a protected runtime sample
 endpoint, and usage counters visible in DevControl. See
 [docs/stage-4-api-keys-usage.md](docs/stage-4-api-keys-usage.md).
 
+## Stage 5 Feature Flags and SDK
+
+Stage 5 adds boolean feature flags, boolean kill switches, audited production
+governance, runtime flag snapshots with ETags, and the first cached local
+evaluation C# SDK. See
+[docs/stage-5-feature-flags-sdk.md](docs/stage-5-feature-flags-sdk.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,

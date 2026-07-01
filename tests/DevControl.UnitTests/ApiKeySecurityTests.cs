@@ -28,6 +28,11 @@ public sealed class ApiKeySecurityTests
         Assert.Equal("[\"sample:read\"]", defaultJson);
         Assert.Empty(defaultErrors);
 
+        Assert.True(ApiKeyScopes.TryNormalize(["flags:read", "sample:read"], out var normalizedScopes, out var normalizedJson, out var normalizedErrors));
+        Assert.Equal([ApiKeyScopes.FlagsRead, ApiKeyScopes.SampleRead], normalizedScopes);
+        Assert.Equal("[\"flags:read\",\"sample:read\"]", normalizedJson);
+        Assert.Empty(normalizedErrors);
+
         Assert.False(ApiKeyScopes.TryNormalize(["sample:read", "unknown"], out _, out _, out var errors));
         Assert.Contains(errors, error => error.Contains("Unsupported API key scope", StringComparison.Ordinal));
     }

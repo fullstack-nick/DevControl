@@ -5,14 +5,16 @@ namespace DevControl.Application.Security;
 public static class ApiKeyScopes
 {
     public const string SampleRead = "sample:read";
+    public const string FlagsRead = "flags:read";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> Supported = new(StringComparer.Ordinal)
     {
-        SampleRead
+        SampleRead,
+        FlagsRead
     };
 
-    public static IReadOnlyList<string> SupportedScopes => [SampleRead];
+    public static IReadOnlyList<string> SupportedScopes => [SampleRead, FlagsRead];
 
     public static bool TryNormalize(
         IReadOnlyList<string>? requestedScopes,

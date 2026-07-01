@@ -147,6 +147,34 @@ type ApiKeyCreateResponse = ApiKey & {
   secret: string;
 };
 
+type FeatureFlag = {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  kind: "FeatureFlag" | "KillSwitch";
+  enabled: boolean;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  createdAt: string;
+  updatedAt: string;
+  lastChangedAt: string;
+};
+
+type FeatureFlagChange = {
+  id: string;
+  featureFlagId: string;
+  oldValue: boolean;
+  newValue: boolean;
+  reason: string;
+  changedByEmail: string;
+  changedAt: string;
+};
+
 type MeResponse = {
   user: User;
   organizations: Organization[];
@@ -261,6 +289,9 @@ export default function App() {
   const [liveApps, setLiveApps] = useState<LiveApp[]>([]);
   const [registrationTokens, setRegistrationTokens] = useState<RegistrationToken[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
+  const [featureFlagChanges, setFeatureFlagChanges] = useState<FeatureFlagChange[]>([]);
+  const [historyFlagId, setHistoryFlagId] = useState<string>("");
   const [createdToken, setCreatedToken] = useState<RegistrationTokenCreateResponse | undefined>();
   const [createdApiKey, setCreatedApiKey] = useState<ApiKeyCreateResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -272,6 +303,8 @@ export default function App() {
   const [inviteForm, setInviteForm] = useState<{ email: string; role: Role }>({ email: "", role: "Developer" });
   const [tokenForm, setTokenForm] = useState({ name: "" });
   const [apiKeyForm, setApiKeyForm] = useState({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
+  const [flagForm, setFlagForm] = useState({ key: "", name: "", description: "", kind: "FeatureFlag", enabled: false, reason: "" });
+  const [flagReasons, setFlagReasons] = useState<Record<string, string>>({});
   const invitationToken = useMemo(inviteTokenFromPath, []);
 
   const selectedOrg = me?.organizations.find((organization) => organization.id === selectedOrgId);
@@ -281,6 +314,9 @@ export default function App() {
   const canManageProjects = roleAtLeast(selectedOrg?.role, "Developer");
   const canReadAudit = roleAtLeast(selectedOrg?.role, "Admin");
   const canReadControlActions = roleAtLeast(selectedOrg?.role, "Developer");
+  const selectedEnvironmentIsProduction = selectedEnvironment?.slug.toLowerCase() === "production";
+  const canManageFlags = roleAtLeast(selectedOrg?.role, selectedEnvironmentIsProduction ? "Admin" : "Developer");
+  const selectedHistoryFlag = featureFlags.find((flag) => flag.id === historyFlagId);
   const filteredLiveApps = liveApps.filter((app) => {
     if (selectedEnvironmentId) {
       return app.environmentId === selectedEnvironmentId;
@@ -328,6 +364,9 @@ export default function App() {
       setLiveApps([]);
       setRegistrationTokens([]);
       setApiKeys([]);
+      setFeatureFlags([]);
+      setFeatureFlagChanges([]);
+      setHistoryFlagId("");
       return;
     }
 
@@ -374,6 +413,23 @@ export default function App() {
     setSelectedEnvironmentId(nextEnvironmentId);
   }
 
+  async function refreshFeatureFlags(organizationId: string, projectId: string, environmentId: string) {
+    if (!organizationId || !projectId || !environmentId) {
+      setFeatureFlags([]);
+      setFeatureFlagChanges([]);
+      setHistoryFlagId("");
+      return;
+    }
+
+    const flagPayload = await api<FeatureFlag[]>(
+      `/api/organizations/${organizationId}/projects/${projectId}/environments/${environmentId}/feature-flags`);
+    setFeatureFlags(flagPayload);
+    if (historyFlagId && !flagPayload.some((flag) => flag.id === historyFlagId)) {
+      setHistoryFlagId("");
+      setFeatureFlagChanges([]);
+    }
+  }
+
   useEffect(() => {
     void loadMe();
   }, []);
@@ -396,6 +452,18 @@ export default function App() {
       setEnvironments([]);
     }
   }, [authenticated, selectedOrgId, selectedProjectId]);
+
+  useEffect(() => {
+    if (authenticated && selectedOrgId && selectedProjectId && selectedEnvironmentId) {
+      void refreshFeatureFlags(selectedOrgId, selectedProjectId, selectedEnvironmentId).catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Failed to load feature flags.");
+      });
+    } else {
+      setFeatureFlags([]);
+      setFeatureFlagChanges([]);
+      setHistoryFlagId("");
+    }
+  }, [authenticated, selectedOrgId, selectedProjectId, selectedEnvironmentId]);
 
   async function runMutation(action: () => Promise<void>) {
     setBusy(true);
@@ -529,6 +597,58 @@ export default function App() {
       setCreatedApiKey(apiKey);
       setNotice("API key created. Copy it now; it will not be shown again.");
     });
+  }
+
+  async function createFeatureFlag(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<FeatureFlag>(
+        `/api/organizations/${selectedOrgId}/projects/${selectedProjectId}/environments/${selectedEnvironmentId}/feature-flags`,
+        {
+          method: "POST",
+          body: JSON.stringify(flagForm)
+        });
+      setFlagForm({ key: "", name: "", description: "", kind: "FeatureFlag", enabled: false, reason: "" });
+      await refreshFeatureFlags(selectedOrgId, selectedProjectId, selectedEnvironmentId);
+      await refreshOrgData(selectedOrgId);
+      setNotice("Feature flag created.");
+    });
+  }
+
+  async function toggleFeatureFlag(flag: FeatureFlag) {
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<FeatureFlag>(`/api/organizations/${selectedOrgId}/feature-flags/${flag.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: !flag.enabled,
+          reason: flagReasons[flag.id] ?? ""
+        })
+      });
+      setFlagReasons(({ [flag.id]: _removed, ...rest }) => rest);
+      await refreshFeatureFlags(selectedOrgId, selectedProjectId, selectedEnvironmentId);
+      if (historyFlagId === flag.id) {
+        await loadFeatureFlagChanges(flag.id);
+      }
+      setNotice(flag.kind === "KillSwitch" ? "Kill switch updated." : "Feature flag updated.");
+    });
+  }
+
+  async function loadFeatureFlagChanges(featureFlagId: string) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    const changes = await api<FeatureFlagChange[]>(`/api/organizations/${selectedOrgId}/feature-flags/${featureFlagId}/changes`);
+    setHistoryFlagId(featureFlagId);
+    setFeatureFlagChanges(changes);
   }
 
   async function revokeApiKey(apiKeyItem: ApiKey) {
@@ -865,6 +985,7 @@ export default function App() {
                     <input placeholder={`Name for ${selectedEnvironment.name}`} value={apiKeyForm.name} onChange={(event) => setApiKeyForm({ ...apiKeyForm, name: event.target.value })} />
                     <select value={apiKeyForm.scope} onChange={(event) => setApiKeyForm({ ...apiKeyForm, scope: event.target.value })}>
                       <option value="sample:read">sample:read</option>
+                      <option value="flags:read">flags:read</option>
                     </select>
                     <input type="number" min="1" max="600" value={apiKeyForm.rateLimitPerMinute} onChange={(event) => setApiKeyForm({ ...apiKeyForm, rateLimitPerMinute: event.target.value })} />
                     <button className="primary" disabled={busy}>Create API key</button>
@@ -872,6 +993,79 @@ export default function App() {
                 )}
               </div>
             )}
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Feature flags</h2>
+                <span>{featureFlags.length}</span>
+              </div>
+              <div className="table">
+                {featureFlags.length === 0 ? <p className="empty">No feature flags</p> : null}
+                {featureFlags.map((flag) => (
+                  <div className="table-row flag-row" key={flag.id}>
+                    <div>
+                      <strong>{flag.name}</strong>
+                      <span>{flag.key} / {flag.kind}</span>
+                      <span>{flag.description || "No description"}</span>
+                      <span>Changed {formatDate(flag.lastChangedAt)}</span>
+                    </div>
+                    <span className={flag.enabled ? "status-on" : "status-off"}>{flag.enabled ? "Enabled" : "Disabled"}</span>
+                    <div className="flag-controls">
+                      {canManageFlags && (
+                        <>
+                          <input
+                            placeholder={selectedEnvironmentIsProduction ? "Reason required for production" : "Reason optional"}
+                            value={flagReasons[flag.id] ?? ""}
+                            onChange={(event) => setFlagReasons({ ...flagReasons, [flag.id]: event.target.value })}
+                          />
+                          <button onClick={() => toggleFeatureFlag(flag)} disabled={busy}>
+                            {flag.enabled ? "Disable" : "Enable"}
+                          </button>
+                        </>
+                      )}
+                      {canReadControlActions && (
+                        <button onClick={() => void loadFeatureFlagChanges(flag.id)} disabled={busy}>History</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {selectedHistoryFlag && (
+                <div className="flag-history">
+                  <strong>{selectedHistoryFlag.key} history</strong>
+                  {featureFlagChanges.length === 0 ? <p className="empty">No history entries</p> : null}
+                  {featureFlagChanges.map((change) => (
+                    <div className="audit-row" key={change.id}>
+                      <time>{formatDate(change.changedAt)}</time>
+                      <strong>{change.oldValue ? "Enabled" : "Disabled"} {">"} {change.newValue ? "Enabled" : "Disabled"}</strong>
+                      <span>{change.changedByEmail}</span>
+                      <p>{change.reason || "No reason"}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {selectedEnvironment && canManageFlags && (
+                <form className="inline-form flag-form" onSubmit={createFeatureFlag}>
+                  <input required placeholder="flag.key" value={flagForm.key} onChange={(event) => setFlagForm({ ...flagForm, key: event.target.value })} />
+                  <input placeholder="Name" value={flagForm.name} onChange={(event) => setFlagForm({ ...flagForm, name: event.target.value })} />
+                  <input placeholder="Description" value={flagForm.description} onChange={(event) => setFlagForm({ ...flagForm, description: event.target.value })} />
+                  <select value={flagForm.kind} onChange={(event) => setFlagForm({ ...flagForm, kind: event.target.value })}>
+                    <option value="FeatureFlag">Feature flag</option>
+                    <option value="KillSwitch">Kill switch</option>
+                  </select>
+                  <label className="checkbox-row">
+                    <input type="checkbox" checked={flagForm.enabled} onChange={(event) => setFlagForm({ ...flagForm, enabled: event.target.checked })} />
+                    Enabled
+                  </label>
+                  <input
+                    placeholder={selectedEnvironmentIsProduction ? "Reason required for production" : "Reason optional"}
+                    value={flagForm.reason}
+                    onChange={(event) => setFlagForm({ ...flagForm, reason: event.target.value })}
+                  />
+                  <button className="primary" disabled={busy}>Create flag</button>
+                </form>
+              )}
+            </div>
 
             {canManageOrg && (
               <div className="panel wide">
