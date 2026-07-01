@@ -55,10 +55,7 @@ public static class MonitoringEndpoints
             return failure;
         }
 
-        var monitors = await QueryMonitorResponses(dbContext, organizationId)
-            .OrderBy(monitor => monitor.ProjectName)
-            .ThenBy(monitor => monitor.EnvironmentName)
-            .ThenBy(monitor => monitor.Name)
+        var monitors = await QueryMonitorResponses(dbContext, organizationId, orderByScope: true)
             .ToListAsync(cancellationToken);
 
         return Results.Ok(monitors);
@@ -144,8 +141,8 @@ public static class MonitoringEndpoints
             monitor.EnvironmentId);
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        var response = await QueryMonitorResponses(dbContext, organizationId)
-            .SingleAsync(candidate => candidate.Id == monitor.Id, cancellationToken);
+        var response = await QueryMonitorResponses(dbContext, organizationId, monitor.Id)
+            .SingleAsync(cancellationToken);
         return Results.Ok(response);
     }
 
@@ -805,8 +802,8 @@ public static class MonitoringEndpoints
         auditLogWriter.Add(organizationId, actor, action, "Succeeded", "uptime_monitor", monitor.Id.ToString(), paused ? "Uptime monitor paused." : "Uptime monitor resumed.", new { monitor.Name, monitor.Url }, monitor.ProjectId, monitor.EnvironmentId);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var response = await QueryMonitorResponses(dbContext, organizationId)
-            .SingleAsync(candidate => candidate.Id == monitor.Id, cancellationToken);
+        var response = await QueryMonitorResponses(dbContext, organizationId, monitor.Id)
+            .SingleAsync(cancellationToken);
         return Results.Ok(response);
     }
 
@@ -909,19 +906,30 @@ public static class MonitoringEndpoints
             request.RecoveryThreshold ?? UptimeMonitor.DefaultRecoveryThreshold);
     }
 
-    private static IQueryable<MonitorResponse> QueryMonitorResponses(DevControlDbContext dbContext, Guid organizationId)
+    private static IQueryable<MonitorResponse> QueryMonitorResponses(
+        DevControlDbContext dbContext,
+        Guid organizationId,
+        Guid? monitorId = null,
+        bool orderByScope = false)
     {
-        return dbContext.UptimeMonitors
-            .Where(monitor => monitor.OrganizationId == organizationId)
+        var monitors = dbContext.UptimeMonitors
+            .Where(monitor => monitor.OrganizationId == organizationId);
+        if (monitorId is { } id)
+        {
+            monitors = monitors.Where(monitor => monitor.Id == id);
+        }
+
+        var query = monitors
             .Join(dbContext.Projects, monitor => monitor.ProjectId, project => project.Id, (monitor, project) => new { monitor, project })
-            .Join(dbContext.ProjectEnvironments, candidate => candidate.monitor.EnvironmentId, environment => environment.Id, (candidate, environment) => new MonitorResponse(
+            .Join(dbContext.ProjectEnvironments, candidate => candidate.monitor.EnvironmentId, environment => environment.Id, (candidate, environment) => new
+            {
                 candidate.monitor.Id,
                 candidate.monitor.LiveAppId,
                 candidate.monitor.Name,
                 candidate.monitor.Url,
                 candidate.monitor.IsManagedFromLiveApp,
                 candidate.monitor.IsPaused,
-                candidate.monitor.CurrentStatus.ToString(),
+                candidate.monitor.CurrentStatus,
                 candidate.monitor.IntervalSeconds,
                 candidate.monitor.TimeoutSeconds,
                 candidate.monitor.SlowThresholdMilliseconds,
@@ -930,17 +938,54 @@ public static class MonitoringEndpoints
                 candidate.monitor.ConsecutiveFailures,
                 candidate.monitor.ConsecutiveRecoveries,
                 candidate.monitor.ProjectId,
-                candidate.project.Name,
-                candidate.project.Slug,
+                ProjectName = candidate.project.Name,
+                ProjectSlug = candidate.project.Slug,
                 candidate.monitor.EnvironmentId,
-                environment.Name,
-                environment.Slug,
+                EnvironmentName = environment.Name,
+                EnvironmentSlug = environment.Slug,
                 candidate.monitor.NextCheckAt,
                 candidate.monitor.LastCheckedAt,
                 candidate.monitor.LastSuccessAt,
                 candidate.monitor.LastFailureAt,
                 candidate.monitor.CreatedAt,
-                candidate.monitor.UpdatedAt));
+                candidate.monitor.UpdatedAt
+            });
+
+        if (orderByScope)
+        {
+            query = query
+                .OrderBy(monitor => monitor.ProjectName)
+                .ThenBy(monitor => monitor.EnvironmentName)
+                .ThenBy(monitor => monitor.Name);
+        }
+
+        return query.Select(monitor => new MonitorResponse(
+            monitor.Id,
+            monitor.LiveAppId,
+            monitor.Name,
+            monitor.Url,
+            monitor.IsManagedFromLiveApp,
+            monitor.IsPaused,
+            monitor.CurrentStatus.ToString(),
+            monitor.IntervalSeconds,
+            monitor.TimeoutSeconds,
+            monitor.SlowThresholdMilliseconds,
+            monitor.FailureThreshold,
+            monitor.RecoveryThreshold,
+            monitor.ConsecutiveFailures,
+            monitor.ConsecutiveRecoveries,
+            monitor.ProjectId,
+            monitor.ProjectName,
+            monitor.ProjectSlug,
+            monitor.EnvironmentId,
+            monitor.EnvironmentName,
+            monitor.EnvironmentSlug,
+            monitor.NextCheckAt,
+            monitor.LastCheckedAt,
+            monitor.LastSuccessAt,
+            monitor.LastFailureAt,
+            monitor.CreatedAt,
+            monitor.UpdatedAt));
     }
 
     private static IQueryable<IncidentResponse> QueryIncidentResponses(DevControlDbContext dbContext, Guid organizationId)
