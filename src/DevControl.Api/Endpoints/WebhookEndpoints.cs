@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DevControl.Api.Monitoring;
 using DevControl.Api.Security;
 using DevControl.Api.Webhooks;
 using DevControl.Application.Security;
@@ -13,7 +14,6 @@ namespace DevControl.Api.Endpoints;
 
 public static class WebhookEndpoints
 {
-    private const int RetryBatchSize = 25;
     private const string SchedulerSecretHeader = "X-DevControl-Scheduler-Secret";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -374,7 +374,7 @@ public static class WebhookEndpoints
     private static async Task<IResult> RunSchedulerTickAsync(
         HttpContext httpContext,
         IConfiguration configuration,
-        WebhookDeliveryService deliveryService,
+        SchedulerTickService schedulerTickService,
         CancellationToken cancellationToken)
     {
         var configuredSecret = configuration["SCHEDULER_SECRET"];
@@ -389,7 +389,7 @@ public static class WebhookEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await deliveryService.ProcessDueRetriesAsync(RetryBatchSize, cancellationToken);
+        var result = await schedulerTickService.RunAsync(cancellationToken);
         return Results.Ok(result);
     }
 

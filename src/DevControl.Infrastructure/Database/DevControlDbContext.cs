@@ -51,6 +51,18 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
 
     public DbSet<WebhookDeliveryAttempt> WebhookDeliveryAttempts => Set<WebhookDeliveryAttempt>();
 
+    public DbSet<UptimeMonitor> UptimeMonitors => Set<UptimeMonitor>();
+
+    public DbSet<MonitorCheck> MonitorChecks => Set<MonitorCheck>();
+
+    public DbSet<Incident> Incidents => Set<Incident>();
+
+    public DbSet<IncidentUpdate> IncidentUpdates => Set<IncidentUpdate>();
+
+    public DbSet<IncidentMonitor> IncidentMonitors => Set<IncidentMonitor>();
+
+    public DbSet<StatusRelease> StatusReleases => Set<StatusRelease>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -76,6 +88,12 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
         ConfigureWebhookEvent(modelBuilder);
         ConfigureWebhookDelivery(modelBuilder);
         ConfigureWebhookDeliveryAttempt(modelBuilder);
+        ConfigureUptimeMonitor(modelBuilder);
+        ConfigureMonitorCheck(modelBuilder);
+        ConfigureIncident(modelBuilder);
+        ConfigureIncidentUpdate(modelBuilder);
+        ConfigureIncidentMonitor(modelBuilder);
+        ConfigureStatusRelease(modelBuilder);
         ConfigureDataProtectionKey(modelBuilder);
     }
 
@@ -1023,6 +1041,371 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.HasOne<WebhookDelivery>()
                 .WithMany()
                 .HasForeignKey(attempt => attempt.WebhookDeliveryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureUptimeMonitor(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<UptimeMonitor>(entity =>
+        {
+            entity.ToTable("uptime_monitors");
+            entity.HasKey(monitor => monitor.Id);
+
+            entity.Property(monitor => monitor.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(monitor => monitor.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(monitor => monitor.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(monitor => monitor.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(monitor => monitor.LiveAppId).HasColumnName("live_app_id");
+            entity.Property(monitor => monitor.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(monitor => monitor.Url).HasColumnName("url").HasMaxLength(1000).IsRequired();
+            entity.Property(monitor => monitor.IsManagedFromLiveApp).HasColumnName("is_managed_from_live_app").IsRequired();
+            entity.Property(monitor => monitor.IsPaused).HasColumnName("is_paused").IsRequired();
+            entity.Property(monitor => monitor.CurrentStatus)
+                .HasColumnName("current_status")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(monitor => monitor.IntervalSeconds).HasColumnName("interval_seconds").IsRequired();
+            entity.Property(monitor => monitor.TimeoutSeconds).HasColumnName("timeout_seconds").IsRequired();
+            entity.Property(monitor => monitor.SlowThresholdMilliseconds).HasColumnName("slow_threshold_milliseconds").IsRequired();
+            entity.Property(monitor => monitor.FailureThreshold).HasColumnName("failure_threshold").IsRequired();
+            entity.Property(monitor => monitor.RecoveryThreshold).HasColumnName("recovery_threshold").IsRequired();
+            entity.Property(monitor => monitor.ConsecutiveFailures).HasColumnName("consecutive_failures").IsRequired();
+            entity.Property(monitor => monitor.ConsecutiveRecoveries).HasColumnName("consecutive_recoveries").IsRequired();
+            entity.Property(monitor => monitor.NextCheckAt).HasColumnName("next_check_at").IsRequired();
+            entity.Property(monitor => monitor.LastCheckedAt).HasColumnName("last_checked_at");
+            entity.Property(monitor => monitor.LastSuccessAt).HasColumnName("last_success_at");
+            entity.Property(monitor => monitor.LastFailureAt).HasColumnName("last_failure_at");
+            entity.Property(monitor => monitor.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(monitor => monitor.UpdatedByUserId).HasColumnName("updated_by_user_id");
+            entity.Property(monitor => monitor.PausedByUserId).HasColumnName("paused_by_user_id");
+            entity.Property(monitor => monitor.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(monitor => monitor.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(monitor => monitor.PausedAt).HasColumnName("paused_at");
+            entity.Property(monitor => monitor.ProcessingLeaseId).HasColumnName("processing_lease_id").HasMaxLength(120);
+            entity.Property(monitor => monitor.ProcessingLeaseExpiresAt).HasColumnName("processing_lease_expires_at");
+
+            entity.HasIndex(monitor => monitor.OrganizationId);
+            entity.HasIndex(monitor => monitor.ProjectId);
+            entity.HasIndex(monitor => monitor.EnvironmentId);
+            entity.HasIndex(monitor => monitor.LiveAppId).IsUnique().HasFilter("live_app_id IS NOT NULL");
+            entity.HasIndex(monitor => new { monitor.IsPaused, monitor.NextCheckAt });
+            entity.HasIndex(monitor => new { monitor.EnvironmentId, monitor.CurrentStatus });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<LiveApp>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.LiveAppId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.UpdatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(monitor => monitor.PausedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureMonitorCheck(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MonitorCheck>(entity =>
+        {
+            entity.ToTable("monitor_checks");
+            entity.HasKey(check => check.Id);
+
+            entity.Property(check => check.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(check => check.UptimeMonitorId).HasColumnName("uptime_monitor_id").IsRequired();
+            entity.Property(check => check.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(check => check.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(check => check.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(check => check.LiveAppId).HasColumnName("live_app_id");
+            entity.Property(check => check.Status)
+                .HasColumnName("status")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(check => check.Succeeded).HasColumnName("succeeded").IsRequired();
+            entity.Property(check => check.StatusCode).HasColumnName("status_code");
+            entity.Property(check => check.ResultKind).HasColumnName("result_kind").HasMaxLength(40).IsRequired();
+            entity.Property(check => check.DurationMilliseconds).HasColumnName("duration_milliseconds").IsRequired();
+            entity.Property(check => check.Error).HasColumnName("error").HasMaxLength(1000).IsRequired();
+            entity.Property(check => check.ResponsePreview).HasColumnName("response_preview").HasMaxLength(4096).IsRequired();
+            entity.Property(check => check.ResponseTruncated).HasColumnName("response_truncated").IsRequired();
+            entity.Property(check => check.CheckedAt).HasColumnName("checked_at").IsRequired();
+
+            entity.HasIndex(check => check.OrganizationId);
+            entity.HasIndex(check => check.UptimeMonitorId);
+            entity.HasIndex(check => new { check.UptimeMonitorId, check.CheckedAt });
+            entity.HasIndex(check => new { check.EnvironmentId, check.CheckedAt });
+
+            entity.HasOne<UptimeMonitor>()
+                .WithMany()
+                .HasForeignKey(check => check.UptimeMonitorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(check => check.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(check => check.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(check => check.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<LiveApp>()
+                .WithMany()
+                .HasForeignKey(check => check.LiveAppId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureIncident(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Incident>(entity =>
+        {
+            entity.ToTable("incidents");
+            entity.HasKey(incident => incident.Id);
+
+            entity.Property(incident => incident.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(incident => incident.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(incident => incident.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(incident => incident.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(incident => incident.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+            entity.Property(incident => incident.Status)
+                .HasColumnName("status")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(incident => incident.Summary).HasColumnName("summary").HasMaxLength(2000).IsRequired();
+            entity.Property(incident => incident.RootCauseSummary).HasColumnName("root_cause_summary").HasMaxLength(4000).IsRequired();
+            entity.Property(incident => incident.PostmortemDraft).HasColumnName("postmortem_draft").HasMaxLength(8000).IsRequired();
+            entity.Property(incident => incident.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(incident => incident.UpdatedByUserId).HasColumnName("updated_by_user_id");
+            entity.Property(incident => incident.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(incident => incident.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(incident => incident.ResolvedAt).HasColumnName("resolved_at");
+
+            entity.HasIndex(incident => incident.OrganizationId);
+            entity.HasIndex(incident => incident.ProjectId);
+            entity.HasIndex(incident => incident.EnvironmentId);
+            entity.HasIndex(incident => new { incident.EnvironmentId, incident.Status, incident.CreatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(incident => incident.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(incident => incident.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(incident => incident.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(incident => incident.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(incident => incident.UpdatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureIncidentUpdate(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<IncidentUpdate>(entity =>
+        {
+            entity.ToTable("incident_updates");
+            entity.HasKey(update => update.Id);
+
+            entity.Property(update => update.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(update => update.IncidentId).HasColumnName("incident_id").IsRequired();
+            entity.Property(update => update.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(update => update.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(update => update.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(update => update.Status)
+                .HasColumnName("status")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(update => update.Visibility)
+                .HasColumnName("visibility")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(update => update.Message).HasColumnName("message").HasMaxLength(4000).IsRequired();
+            entity.Property(update => update.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(update => update.CreatedByEmail).HasColumnName("created_by_email").HasMaxLength(320).IsRequired();
+            entity.Property(update => update.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasIndex(update => update.OrganizationId);
+            entity.HasIndex(update => update.IncidentId);
+            entity.HasIndex(update => new { update.IncidentId, update.CreatedAt });
+            entity.HasIndex(update => new { update.EnvironmentId, update.Visibility, update.CreatedAt });
+
+            entity.HasOne<Incident>()
+                .WithMany()
+                .HasForeignKey(update => update.IncidentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(update => update.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(update => update.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(update => update.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(update => update.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureIncidentMonitor(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<IncidentMonitor>(entity =>
+        {
+            entity.ToTable("incident_monitors");
+            entity.HasKey(link => link.Id);
+
+            entity.Property(link => link.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(link => link.IncidentId).HasColumnName("incident_id").IsRequired();
+            entity.Property(link => link.UptimeMonitorId).HasColumnName("uptime_monitor_id").IsRequired();
+            entity.Property(link => link.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(link => link.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(link => link.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(link => link.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasIndex(link => link.OrganizationId);
+            entity.HasIndex(link => link.IncidentId);
+            entity.HasIndex(link => link.UptimeMonitorId);
+            entity.HasIndex(link => new { link.IncidentId, link.UptimeMonitorId }).IsUnique();
+
+            entity.HasOne<Incident>()
+                .WithMany()
+                .HasForeignKey(link => link.IncidentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<UptimeMonitor>()
+                .WithMany()
+                .HasForeignKey(link => link.UptimeMonitorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(link => link.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(link => link.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(link => link.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureStatusRelease(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<StatusRelease>(entity =>
+        {
+            entity.ToTable("status_releases");
+            entity.HasKey(release => release.Id);
+
+            entity.Property(release => release.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(release => release.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(release => release.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(release => release.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(release => release.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+            entity.Property(release => release.Version).HasColumnName("version").HasMaxLength(120).IsRequired();
+            entity.Property(release => release.Body).HasColumnName("body").HasMaxLength(8000).IsRequired();
+            entity.Property(release => release.Status)
+                .HasColumnName("status")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(release => release.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(release => release.PublishedByUserId).HasColumnName("published_by_user_id");
+            entity.Property(release => release.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(release => release.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(release => release.PublishedAt).HasColumnName("published_at");
+
+            entity.HasIndex(release => release.OrganizationId);
+            entity.HasIndex(release => release.ProjectId);
+            entity.HasIndex(release => release.EnvironmentId);
+            entity.HasIndex(release => new { release.EnvironmentId, release.Status, release.PublishedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(release => release.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(release => release.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(release => release.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(release => release.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(release => release.PublishedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

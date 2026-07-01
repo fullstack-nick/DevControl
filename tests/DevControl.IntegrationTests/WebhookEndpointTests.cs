@@ -196,6 +196,12 @@ public sealed partial class WebhookEndpointTests
             var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
             await dbContext.Database.ExecuteSqlRawAsync("""
                 DROP TABLE IF EXISTS
+                    incident_monitors,
+                    incident_updates,
+                    monitor_checks,
+                    status_releases,
+                    incidents,
+                    uptime_monitors,
                     webhook_delivery_attempts,
                     webhook_deliveries,
                     webhook_events,

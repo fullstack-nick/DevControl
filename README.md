@@ -90,6 +90,13 @@ Stage 6 adds the SSRF-safe outbound HTTP layer, HMAC-signed webhooks, test
 delivery, pause/resume, delivery attempts, and bounded retry batches. See
 [docs/stage-6-safe-outbound-webhooks.md](docs/stage-6-safe-outbound-webhooks.md).
 
+## Stage 7 Monitoring, Incidents, and Status Page
+
+Stage 7 adds managed uptime monitors for registered live apps, scheduler-driven
+health checks, automatic incident open/recovery, public status pages, and
+manual release notes. See
+[docs/stage-7-monitoring-incidents-status.md](docs/stage-7-monitoring-incidents-status.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,

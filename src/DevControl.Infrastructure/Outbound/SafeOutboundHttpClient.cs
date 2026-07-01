@@ -16,54 +16,54 @@ public sealed class SafeOutboundHttpClient(
     public async Task<SafeOutboundResponse> SendAsync(SafeOutboundRequest request, CancellationToken cancellationToken)
     {
         var startedAt = Stopwatch.GetTimestamp();
-        var guardResult = await guard.ValidateAsync(request.Url, request.Policy, cancellationToken);
-        if (!guardResult.IsAllowed || guardResult.Address is null)
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(request.Policy.Timeout);
+        var current = request.Url;
+
+        try
         {
+            for (var redirectCount = 0; redirectCount <= request.Policy.MaxRedirects; redirectCount++)
+            {
+                var response = await SendOnceAsync(request with { Url = current }, timeout.Token, startedAt);
+                if (!IsRedirect(response.StatusCode))
+                {
+                    return response;
+                }
+
+                if (redirectCount == request.Policy.MaxRedirects)
+                {
+                    return new SafeOutboundResponse(
+                        SafeOutboundResultKind.InvalidRequest,
+                        response.StatusCode,
+                        response.ResponsePreview,
+                        response.ResponseTruncated,
+                        response.ResponseBytesRead,
+                        "Outbound request exceeded the redirect limit.",
+                        Stopwatch.GetElapsedTime(startedAt));
+                }
+
+                if (!TryResolveRedirect(current, response.RedirectLocation, out var redirected, out var redirectError))
+                {
+                    return new SafeOutboundResponse(
+                        SafeOutboundResultKind.InvalidRequest,
+                        response.StatusCode,
+                        response.ResponsePreview,
+                        response.ResponseTruncated,
+                        response.ResponseBytesRead,
+                        redirectError ?? "Outbound redirect location is invalid.",
+                        Stopwatch.GetElapsedTime(startedAt));
+                }
+
+                current = redirected!;
+            }
+
             return new SafeOutboundResponse(
-                SafeOutboundResultKind.Blocked,
+                SafeOutboundResultKind.InvalidRequest,
                 null,
                 string.Empty,
                 ResponseTruncated: false,
                 ResponseBytesRead: 0,
-                guardResult.Error ?? "Outbound request blocked.",
-                Stopwatch.GetElapsedTime(startedAt));
-        }
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(request.Policy.Timeout);
-
-        try
-        {
-            using var handler = CreateHandler(guardResult.Address, guardResult.Port);
-            using var httpClient = new HttpClient(handler)
-            {
-                Timeout = Timeout.InfiniteTimeSpan
-            };
-            using var httpRequest = new HttpRequestMessage(request.Method, request.Url);
-
-            foreach (var header in request.Headers)
-            {
-                httpRequest.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-
-            if (request.Body is not null)
-            {
-                httpRequest.Content = new StringContent(request.Body, Encoding.UTF8, request.ContentType);
-            }
-
-            using var response = await httpClient.SendAsync(
-                httpRequest,
-                HttpCompletionOption.ResponseHeadersRead,
-                timeout.Token);
-            var preview = await ReadPreviewAsync(response.Content, request.Policy, timeout.Token);
-
-            return new SafeOutboundResponse(
-                SafeOutboundResultKind.Completed,
-                response.StatusCode,
-                preview.Text,
-                preview.Truncated,
-                preview.BytesRead,
-                null,
+                "Outbound request exceeded the redirect limit.",
                 Stopwatch.GetElapsedTime(startedAt));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -79,7 +79,7 @@ public sealed class SafeOutboundHttpClient(
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or SocketException)
         {
-            logger.LogInformation(exception, "Safe outbound request to {Host} failed.", request.Url.Host);
+            logger.LogInformation(exception, "Safe outbound request to {Host} failed.", current.Host);
             return new SafeOutboundResponse(
                 SafeOutboundResultKind.NetworkError,
                 null,
@@ -89,6 +89,87 @@ public sealed class SafeOutboundHttpClient(
                 "Outbound request failed before a response was received.",
                 Stopwatch.GetElapsedTime(startedAt));
         }
+    }
+
+    private async Task<SafeOutboundResponse> SendOnceAsync(
+        SafeOutboundRequest request,
+        CancellationToken cancellationToken,
+        long startedAt)
+    {
+        var guardResult = await guard.ValidateAsync(request.Url, request.Policy, cancellationToken);
+        if (!guardResult.IsAllowed || guardResult.Address is null)
+        {
+            return new SafeOutboundResponse(
+                SafeOutboundResultKind.Blocked,
+                null,
+                string.Empty,
+                ResponseTruncated: false,
+                ResponseBytesRead: 0,
+                guardResult.Error ?? "Outbound request blocked.",
+                Stopwatch.GetElapsedTime(startedAt));
+        }
+
+        using var handler = CreateHandler(guardResult.Address, guardResult.Port);
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        using var httpRequest = new HttpRequestMessage(request.Method, request.Url);
+
+        foreach (var header in request.Headers)
+        {
+            httpRequest.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        if (request.Body is not null)
+        {
+            httpRequest.Content = new StringContent(request.Body, Encoding.UTF8, request.ContentType);
+        }
+
+        using var response = await httpClient.SendAsync(
+            httpRequest,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        var preview = await ReadPreviewAsync(response.Content, request.Policy, cancellationToken);
+
+        return new SafeOutboundResponse(
+            SafeOutboundResultKind.Completed,
+            response.StatusCode,
+            preview.Text,
+            preview.Truncated,
+            preview.BytesRead,
+            null,
+            Stopwatch.GetElapsedTime(startedAt),
+            response.Headers.Location?.ToString());
+    }
+
+    private static bool IsRedirect(HttpStatusCode? statusCode)
+    {
+        return statusCode is HttpStatusCode.Moved or
+            HttpStatusCode.Redirect or
+            HttpStatusCode.RedirectMethod or
+            HttpStatusCode.TemporaryRedirect or
+            HttpStatusCode.PermanentRedirect;
+    }
+
+    private static bool TryResolveRedirect(Uri current, string? location, out Uri? redirected, out string? error)
+    {
+        redirected = null;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(location))
+        {
+            error = "Outbound redirect did not include a Location header.";
+            return false;
+        }
+
+        if (!Uri.TryCreate(current, location, out redirected) || !redirected.IsAbsoluteUri)
+        {
+            error = "Outbound redirect location must be absolute or relative to the current URL.";
+            return false;
+        }
+
+        return true;
     }
 
     private static SocketsHttpHandler CreateHandler(IPAddress address, int port)

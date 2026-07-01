@@ -220,6 +220,132 @@ type WebhookDelivery = {
   createdAt: string;
 };
 
+type Monitor = {
+  id: string;
+  liveAppId?: string;
+  name: string;
+  url: string;
+  isManagedFromLiveApp: boolean;
+  isPaused: boolean;
+  currentStatus: string;
+  intervalSeconds: number;
+  timeoutSeconds: number;
+  slowThresholdMilliseconds: number;
+  failureThreshold: number;
+  recoveryThreshold: number;
+  consecutiveFailures: number;
+  consecutiveRecoveries: number;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  nextCheckAt: string;
+  lastCheckedAt?: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type MonitorCheck = {
+  id: string;
+  monitorId: string;
+  status: string;
+  succeeded: boolean;
+  statusCode?: number;
+  resultKind: string;
+  durationMilliseconds: number;
+  error: string;
+  responsePreview: string;
+  responseTruncated: boolean;
+  checkedAt: string;
+};
+
+type Incident = {
+  id: string;
+  title: string;
+  status: string;
+  summary: string;
+  rootCauseSummary: string;
+  postmortemDraft: string;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+};
+
+type IncidentUpdate = {
+  id: string;
+  incidentId: string;
+  status: string;
+  visibility: string;
+  message: string;
+  createdByEmail: string;
+  createdAt: string;
+};
+
+type StatusRelease = {
+  id: string;
+  title: string;
+  version: string;
+  body: string;
+  status: string;
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+};
+
+type PublicStatusPage = {
+  organizationName: string;
+  organizationSlug: string;
+  projectName: string;
+  projectSlug: string;
+  overallStatus: string;
+  environments: Array<{ name: string; slug: string }>;
+  monitors: Array<{
+    id: string;
+    name: string;
+    environmentName: string;
+    environmentSlug: string;
+    status: string;
+    lastCheckedAt?: string;
+    uptimePercentLast24Hours: number;
+  }>;
+  incidents: Array<{
+    id: string;
+    title: string;
+    status: string;
+    summary: string;
+    environmentName: string;
+    environmentSlug: string;
+    createdAt: string;
+    resolvedAt?: string;
+    updates: IncidentUpdate[];
+  }>;
+  releases: Array<{
+    id: string;
+    title: string;
+    version: string;
+    body: string;
+    environmentName: string;
+    environmentSlug: string;
+    publishedAt: string;
+  }>;
+};
+
 type MeResponse = {
   user: User;
   organizations: Organization[];
@@ -243,7 +369,13 @@ const webhookEventTypes = [
   "api_key.revoked",
   "api_key.rotated",
   "feature_flag.created",
-  "feature_flag.updated"
+  "feature_flag.updated",
+  "monitor.down",
+  "monitor.recovered",
+  "incident.created",
+  "incident.updated",
+  "incident.resolved",
+  "release.published"
 ];
 
 let csrfToken: string | undefined;
@@ -329,6 +461,16 @@ function inviteTokenFromPath() {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function statusPageFromPath() {
+  const match = window.location.pathname.match(/^\/status\/([^/]+)\/([^/]+)$/);
+  return match
+    ? {
+        organizationSlug: decodeURIComponent(match[1]),
+        projectSlug: decodeURIComponent(match[2])
+      }
+    : undefined;
+}
+
 export default function App() {
   const [me, setMe] = useState<MeResponse | undefined>();
   const [authenticated, setAuthenticated] = useState<boolean | undefined>();
@@ -348,8 +490,17 @@ export default function App() {
   const [featureFlagChanges, setFeatureFlagChanges] = useState<FeatureFlagChange[]>([]);
   const [webhookEndpoints, setWebhookEndpoints] = useState<WebhookEndpoint[]>([]);
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
+  const [monitors, setMonitors] = useState<Monitor[]>([]);
+  const [monitorChecks, setMonitorChecks] = useState<MonitorCheck[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [incidentUpdates, setIncidentUpdates] = useState<IncidentUpdate[]>([]);
+  const [releases, setReleases] = useState<StatusRelease[]>([]);
+  const [publicStatus, setPublicStatus] = useState<PublicStatusPage | undefined>();
+  const [publicStatusError, setPublicStatusError] = useState<string | undefined>();
   const [historyFlagId, setHistoryFlagId] = useState<string>("");
   const [selectedWebhookEndpointId, setSelectedWebhookEndpointId] = useState<string>("");
+  const [selectedMonitorId, setSelectedMonitorId] = useState<string>("");
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string>("");
   const [createdToken, setCreatedToken] = useState<RegistrationTokenCreateResponse | undefined>();
   const [createdApiKey, setCreatedApiKey] = useState<ApiKeyCreateResponse | undefined>();
   const [createdWebhookEndpoint, setCreatedWebhookEndpoint] = useState<WebhookEndpointCreateResponse | undefined>();
@@ -364,12 +515,25 @@ export default function App() {
   const [apiKeyForm, setApiKeyForm] = useState({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
   const [flagForm, setFlagForm] = useState({ key: "", name: "", description: "", kind: "FeatureFlag", enabled: false, reason: "" });
   const [flagReasons, setFlagReasons] = useState<Record<string, string>>({});
+  const [monitorForm, setMonitorForm] = useState({
+    name: "",
+    url: "",
+    intervalSeconds: "300",
+    timeoutSeconds: "5",
+    slowThresholdMilliseconds: "2000",
+    failureThreshold: "1",
+    recoveryThreshold: "1"
+  });
+  const [incidentForm, setIncidentForm] = useState({ title: "", summary: "", message: "", private: false });
+  const [incidentUpdateForm, setIncidentUpdateForm] = useState({ message: "", status: "Investigating", private: false });
+  const [releaseForm, setReleaseForm] = useState({ title: "", version: "", body: "" });
   const [webhookForm, setWebhookForm] = useState({
     name: "",
     url: "",
     eventTypes: Object.fromEntries(webhookEventTypes.map((eventType) => [eventType, eventType === "webhook.test"])) as Record<string, boolean>
   });
   const invitationToken = useMemo(inviteTokenFromPath, []);
+  const statusPage = useMemo(statusPageFromPath, []);
 
   const selectedOrg = me?.organizations.find((organization) => organization.id === selectedOrgId);
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
@@ -402,7 +566,34 @@ export default function App() {
 
     return selectedProjectId ? endpoint.projectId === selectedProjectId : true;
   });
+  const filteredMonitors = monitors.filter((monitor) => {
+    if (selectedEnvironmentId) {
+      return monitor.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? monitor.projectId === selectedProjectId : true;
+  });
+  const filteredIncidents = incidents.filter((incident) => {
+    if (selectedEnvironmentId) {
+      return incident.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? incident.projectId === selectedProjectId : true;
+  });
+  const filteredReleases = releases.filter((release) => {
+    if (selectedEnvironmentId) {
+      return release.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? release.projectId === selectedProjectId : true;
+  });
   const selectedWebhookEndpoint = webhookEndpoints.find((endpoint) => endpoint.id === selectedWebhookEndpointId);
+  const selectedMonitor = monitors.find((monitor) => monitor.id === selectedMonitorId);
+  const selectedIncident = incidents.find((incident) => incident.id === selectedIncidentId);
+  const canManageMonitors = roleAtLeast(selectedOrg?.role, selectedEnvironmentIsProduction ? "Admin" : "Developer");
+  const canManageIncidents = roleAtLeast(selectedOrg?.role, "Developer");
+  const canPublishReleases = roleAtLeast(selectedOrg?.role, "Admin");
+  const statusPagePath = selectedOrg && selectedProject ? `/status/${selectedOrg.slug}/${selectedProject.slug}${selectedEnvironment ? `?environment=${selectedEnvironment.slug}` : ""}` : "";
 
   async function loadMe(preferredOrganizationId?: string) {
     try {
@@ -438,15 +629,22 @@ export default function App() {
       setApiKeys([]);
       setWebhookEndpoints([]);
       setWebhookDeliveries([]);
+      setMonitors([]);
+      setMonitorChecks([]);
+      setIncidents([]);
+      setIncidentUpdates([]);
+      setReleases([]);
       setFeatureFlags([]);
       setFeatureFlagChanges([]);
       setHistoryFlagId("");
       setSelectedWebhookEndpointId("");
+      setSelectedMonitorId("");
+      setSelectedIncidentId("");
       return;
     }
 
     const selected = me?.organizations.find((organization) => organization.id === organizationId);
-    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, webhookPayload, auditPayload, controlActionPayload] = await Promise.all([
+    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, webhookPayload, monitorPayload, incidentPayload, releasePayload, auditPayload, controlActionPayload] = await Promise.all([
       api<Project[]>(`/api/organizations/${organizationId}/projects`),
       api<LiveApp[]>(`/api/organizations/${organizationId}/apps`),
       roleAtLeast(selected?.role, "Admin") ? api<Member[]>(`/api/organizations/${organizationId}/members`) : Promise.resolve([]),
@@ -454,6 +652,9 @@ export default function App() {
       roleAtLeast(selected?.role, "Admin") ? api<RegistrationToken[]>(`/api/organizations/${organizationId}/registration-tokens`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<ApiKey[]>(`/api/organizations/${organizationId}/api-keys`) : Promise.resolve([]),
       api<WebhookEndpoint[]>(`/api/organizations/${organizationId}/webhook-endpoints`),
+      api<Monitor[]>(`/api/organizations/${organizationId}/monitors`),
+      api<Incident[]>(`/api/organizations/${organizationId}/incidents`),
+      api<StatusRelease[]>(`/api/organizations/${organizationId}/releases`),
       roleAtLeast(selected?.role, "Admin") ? api<AuditLog[]>(`/api/organizations/${organizationId}/audit-logs`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Developer") ? api<ControlAction[]>(`/api/organizations/${organizationId}/control-actions`) : Promise.resolve([])
     ]);
@@ -465,6 +666,9 @@ export default function App() {
     setRegistrationTokens(tokenPayload);
     setApiKeys(apiKeyPayload);
     setWebhookEndpoints(webhookPayload);
+    setMonitors(monitorPayload);
+    setIncidents(incidentPayload);
+    setReleases(releasePayload);
     setAuditLogs(auditPayload);
     setControlActions(controlActionPayload);
     const nextProjectId = selectedProjectId && projectPayload.some((project) => project.id === selectedProjectId)
@@ -477,6 +681,14 @@ export default function App() {
     if (selectedWebhookEndpointId && !webhookPayload.some((endpoint) => endpoint.id === selectedWebhookEndpointId)) {
       setSelectedWebhookEndpointId("");
       setWebhookDeliveries([]);
+    }
+    if (selectedMonitorId && !monitorPayload.some((monitor) => monitor.id === selectedMonitorId)) {
+      setSelectedMonitorId("");
+      setMonitorChecks([]);
+    }
+    if (selectedIncidentId && !incidentPayload.some((incident) => incident.id === selectedIncidentId)) {
+      setSelectedIncidentId("");
+      setIncidentUpdates([]);
     }
   }
 
@@ -522,9 +734,62 @@ export default function App() {
     setWebhookDeliveries(deliveries);
   }
 
+  async function loadMonitorChecks(monitor: Monitor) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    const checks = await api<MonitorCheck[]>(`/api/organizations/${selectedOrgId}/monitors/${monitor.id}/checks`);
+    setSelectedMonitorId(monitor.id);
+    setMonitorChecks(checks);
+    setMonitorForm({
+      name: monitor.name,
+      url: monitor.url,
+      intervalSeconds: String(monitor.intervalSeconds),
+      timeoutSeconds: String(monitor.timeoutSeconds),
+      slowThresholdMilliseconds: String(monitor.slowThresholdMilliseconds),
+      failureThreshold: String(monitor.failureThreshold),
+      recoveryThreshold: String(monitor.recoveryThreshold)
+    });
+  }
+
+  async function loadIncidentUpdates(incidentId: string) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    const updates = await api<IncidentUpdate[]>(`/api/organizations/${selectedOrgId}/incidents/${incidentId}/updates`);
+    const incident = incidents.find((candidate) => candidate.id === incidentId);
+    setSelectedIncidentId(incidentId);
+    setIncidentUpdates(updates);
+    setIncidentUpdateForm({
+      message: "",
+      status: incident?.status ?? "Investigating",
+      private: false
+    });
+  }
+
   useEffect(() => {
     void loadMe();
   }, []);
+
+  useEffect(() => {
+    if (!statusPage) {
+      return;
+    }
+
+    const environment = new URLSearchParams(window.location.search).get("environment");
+    const path = `/api/public/status/${statusPage.organizationSlug}/${statusPage.projectSlug}${environment ? `?environment=${encodeURIComponent(environment)}` : ""}`;
+    api<PublicStatusPage>(path)
+      .then((payload) => {
+        setPublicStatus(payload);
+        setPublicStatusError(undefined);
+      })
+      .catch((loadError: unknown) => {
+        setPublicStatus(undefined);
+        setPublicStatusError(loadError instanceof Error ? loadError.message : "Failed to load status page.");
+      });
+  }, [statusPage]);
 
   useEffect(() => {
     if (authenticated && selectedOrgId) {
@@ -566,6 +831,26 @@ export default function App() {
       setWebhookDeliveries([]);
     }
   }, [authenticated, selectedOrgId, selectedWebhookEndpointId]);
+
+  useEffect(() => {
+    if (authenticated && selectedOrgId && selectedMonitor) {
+      void loadMonitorChecks(selectedMonitor).catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Failed to load monitor checks.");
+      });
+    } else {
+      setMonitorChecks([]);
+    }
+  }, [authenticated, selectedOrgId, selectedMonitorId]);
+
+  useEffect(() => {
+    if (authenticated && selectedOrgId && selectedIncidentId) {
+      void loadIncidentUpdates(selectedIncidentId).catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Failed to load incident updates.");
+      });
+    } else {
+      setIncidentUpdates([]);
+    }
+  }, [authenticated, selectedOrgId, selectedIncidentId]);
 
   async function runMutation(action: () => Promise<void>) {
     setBusy(true);
@@ -775,6 +1060,112 @@ export default function App() {
     });
   }
 
+  async function saveMonitor(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedMonitor) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<Monitor>(`/api/organizations/${selectedOrgId}/monitors/${selectedMonitor.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: monitorForm.name,
+          url: monitorForm.url,
+          intervalSeconds: Number(monitorForm.intervalSeconds),
+          timeoutSeconds: Number(monitorForm.timeoutSeconds),
+          slowThresholdMilliseconds: Number(monitorForm.slowThresholdMilliseconds),
+          failureThreshold: Number(monitorForm.failureThreshold),
+          recoveryThreshold: Number(monitorForm.recoveryThreshold)
+        })
+      });
+      await refreshOrgData(selectedOrgId);
+      setNotice("Monitor updated.");
+    });
+  }
+
+  async function changeMonitorPause(monitor: Monitor) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const action = monitor.isPaused ? "resume" : "pause";
+      await api<Monitor>(`/api/organizations/${selectedOrgId}/monitors/${monitor.id}/${action}`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setNotice(monitor.isPaused ? "Monitor resumed." : "Monitor paused.");
+    });
+  }
+
+  async function createIncident(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const incident = await api<Incident>(
+        `/api/organizations/${selectedOrgId}/projects/${selectedProjectId}/environments/${selectedEnvironmentId}/incidents`,
+        {
+          method: "POST",
+          body: JSON.stringify(incidentForm)
+        });
+      setIncidentForm({ title: "", summary: "", message: "", private: false });
+      await refreshOrgData(selectedOrgId);
+      setSelectedIncidentId(incident.id);
+      setNotice("Incident created.");
+    });
+  }
+
+  async function addIncidentUpdate(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedIncident) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<IncidentUpdate>(`/api/organizations/${selectedOrgId}/incidents/${selectedIncident.id}/updates`, {
+        method: "POST",
+        body: JSON.stringify(incidentUpdateForm)
+      });
+      setIncidentUpdateForm({ message: "", status: selectedIncident.status, private: false });
+      await refreshOrgData(selectedOrgId);
+      await loadIncidentUpdates(selectedIncident.id);
+      setNotice("Incident update added.");
+    });
+  }
+
+  async function createRelease(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<StatusRelease>(
+        `/api/organizations/${selectedOrgId}/projects/${selectedProjectId}/environments/${selectedEnvironmentId}/releases`,
+        {
+          method: "POST",
+          body: JSON.stringify(releaseForm)
+        });
+      setReleaseForm({ title: "", version: "", body: "" });
+      await refreshOrgData(selectedOrgId);
+      setNotice("Release draft created.");
+    });
+  }
+
+  async function publishRelease(release: StatusRelease) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      await api<StatusRelease>(`/api/organizations/${selectedOrgId}/releases/${release.id}/publish`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setNotice("Release published.");
+    });
+  }
+
   async function createFeatureFlag(event: FormEvent) {
     event.preventDefault();
     if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
@@ -928,6 +1319,98 @@ export default function App() {
       await loadMe();
       setNotice("Invitation accepted.");
     });
+  }
+
+  if (statusPage) {
+    if (publicStatusError) {
+      return <main className="loading">Status page unavailable: {publicStatusError}</main>;
+    }
+
+    if (!publicStatus) {
+      return <main className="loading">Loading status...</main>;
+    }
+
+    return (
+      <main className="app-shell status-page">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">DevControl Status</p>
+            <h1>{publicStatus.projectName}</h1>
+          </div>
+          <strong className={`status-pill status-${publicStatus.overallStatus}`}>{publicStatus.overallStatus}</strong>
+        </header>
+        <section className="workspace-grid">
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Monitors</h2>
+              <span>{publicStatus.monitors.length}</span>
+            </div>
+            <div className="table">
+              {publicStatus.monitors.length === 0 ? <p className="empty">No monitors</p> : null}
+              {publicStatus.monitors.map((monitor) => (
+                <div className="table-row monitor-row" key={monitor.id}>
+                  <div>
+                    <strong>{monitor.name}</strong>
+                    <span>{monitor.environmentName}</span>
+                    <span>Last checked {formatDate(monitor.lastCheckedAt)}</span>
+                  </div>
+                  <span className={monitor.status === "Up" ? "status-on" : "status-off"}>{monitor.status}</span>
+                  <span>{monitor.uptimePercentLast24Hours.toFixed(2)}% 24h</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Incidents</h2>
+              <span>{publicStatus.incidents.length}</span>
+            </div>
+            <div className="table">
+              {publicStatus.incidents.length === 0 ? <p className="empty">No incidents</p> : null}
+              {publicStatus.incidents.map((incident) => (
+                <div className="status-incident" key={incident.id}>
+                  <div className="table-row incident-row">
+                    <div>
+                      <strong>{incident.title}</strong>
+                      <span>{incident.environmentName} / {incident.status}</span>
+                      <span>{formatDate(incident.createdAt)}</span>
+                    </div>
+                    <p>{incident.summary}</p>
+                  </div>
+                  {incident.updates.map((update) => (
+                    <div className="audit-row" key={update.id}>
+                      <time>{formatDate(update.createdAt)}</time>
+                      <strong>{update.status}</strong>
+                      <span>{update.createdByEmail}</span>
+                      <p>{update.message}</p>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Releases</h2>
+              <span>{publicStatus.releases.length}</span>
+            </div>
+            <div className="table">
+              {publicStatus.releases.length === 0 ? <p className="empty">No releases</p> : null}
+              {publicStatus.releases.map((release) => (
+                <div className="table-row release-row" key={release.id}>
+                  <div>
+                    <strong>{release.title}</strong>
+                    <span>{release.environmentName} / {release.version}</span>
+                    <span>Published {formatDate(release.publishedAt)}</span>
+                  </div>
+                  <p>{release.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   if (authenticated === undefined) {
@@ -1262,6 +1745,164 @@ export default function App() {
                 )}
               </div>
             )}
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Monitors</h2>
+                <span>{filteredMonitors.length}</span>
+              </div>
+              {statusPagePath && (
+                <p className="status-link"><a href={statusPagePath} target="_blank" rel="noreferrer">Public status page</a></p>
+              )}
+              <div className="table">
+                {filteredMonitors.length === 0 ? <p className="empty">No monitors</p> : null}
+                {filteredMonitors.map((monitor) => (
+                  <div className="table-row monitor-row" key={monitor.id}>
+                    <div>
+                      <strong>{monitor.name}</strong>
+                      <span>{monitor.projectName} / {monitor.environmentName}</span>
+                      <span>{monitor.url}</span>
+                      <span>Last checked {formatDate(monitor.lastCheckedAt)} / next {formatDate(monitor.nextCheckAt)}</span>
+                    </div>
+                    <div className="usage-metrics">
+                      <span className={monitor.currentStatus === "Up" || monitor.currentStatus === "Slow" ? "status-on" : "status-off"}>{monitor.isPaused ? "Paused" : monitor.currentStatus}</span>
+                      <span>{monitor.consecutiveFailures} failures</span>
+                      <span>{monitor.consecutiveRecoveries} recoveries</span>
+                    </div>
+                    <div className="actions">
+                      <button onClick={() => void loadMonitorChecks(monitor)} disabled={busy}>Checks</button>
+                      {canManageMonitors && <button onClick={() => changeMonitorPause(monitor)} disabled={busy}>{monitor.isPaused ? "Resume" : "Pause"}</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {selectedMonitor && (
+                <div className="delivery-history">
+                  <strong>{selectedMonitor.name} checks</strong>
+                  {canManageMonitors && (
+                    <form className="inline-form monitor-form" onSubmit={saveMonitor}>
+                      <input required placeholder="Name" value={monitorForm.name} onChange={(event) => setMonitorForm({ ...monitorForm, name: event.target.value })} />
+                      <input required placeholder="https://app.example.com/health" value={monitorForm.url} onChange={(event) => setMonitorForm({ ...monitorForm, url: event.target.value })} />
+                      <input type="number" min="60" max="86400" value={monitorForm.intervalSeconds} onChange={(event) => setMonitorForm({ ...monitorForm, intervalSeconds: event.target.value })} />
+                      <input type="number" min="1" max="30" value={monitorForm.timeoutSeconds} onChange={(event) => setMonitorForm({ ...monitorForm, timeoutSeconds: event.target.value })} />
+                      <input type="number" min="100" max="30000" value={monitorForm.slowThresholdMilliseconds} onChange={(event) => setMonitorForm({ ...monitorForm, slowThresholdMilliseconds: event.target.value })} />
+                      <input type="number" min="1" max="10" value={monitorForm.failureThreshold} onChange={(event) => setMonitorForm({ ...monitorForm, failureThreshold: event.target.value })} />
+                      <input type="number" min="1" max="10" value={monitorForm.recoveryThreshold} onChange={(event) => setMonitorForm({ ...monitorForm, recoveryThreshold: event.target.value })} />
+                      <button className="primary" disabled={busy}>Save</button>
+                    </form>
+                  )}
+                  {monitorChecks.length === 0 ? <p className="empty">No checks</p> : null}
+                  {monitorChecks.map((check) => (
+                    <div className="table-row monitor-check-row" key={check.id}>
+                      <div>
+                        <strong>{check.status}</strong>
+                        <span>{check.resultKind} / HTTP {check.statusCode ?? "-"}</span>
+                        <span>{formatDate(check.checkedAt)}</span>
+                      </div>
+                      <span>{check.durationMilliseconds} ms</span>
+                      <div>
+                        <span>{check.error || "No error"}</span>
+                        <span>{check.responsePreview || "No response preview"}{check.responseTruncated ? "..." : ""}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Incidents</h2>
+                <span>{filteredIncidents.length}</span>
+              </div>
+              <div className="table">
+                {filteredIncidents.length === 0 ? <p className="empty">No incidents</p> : null}
+                {filteredIncidents.map((incident) => (
+                  <div className="table-row incident-dashboard-row" key={incident.id}>
+                    <div>
+                      <strong>{incident.title}</strong>
+                      <span>{incident.projectName} / {incident.environmentName}</span>
+                      <span>{incident.summary || "No summary"}</span>
+                      <span>Created {formatDate(incident.createdAt)}</span>
+                    </div>
+                    <span className={incident.status === "Resolved" ? "status-on" : "status-off"}>{incident.status}</span>
+                    <button onClick={() => void loadIncidentUpdates(incident.id)} disabled={busy}>Updates</button>
+                  </div>
+                ))}
+              </div>
+              {selectedIncident && (
+                <div className="flag-history">
+                  <strong>{selectedIncident.title} timeline</strong>
+                  {incidentUpdates.length === 0 ? <p className="empty">No updates</p> : null}
+                  {incidentUpdates.map((update) => (
+                    <div className="audit-row" key={update.id}>
+                      <time>{formatDate(update.createdAt)}</time>
+                      <strong>{update.status}</strong>
+                      <span>{update.visibility}</span>
+                      <p>{update.message}</p>
+                    </div>
+                  ))}
+                  {canManageIncidents && (
+                    <form className="inline-form incident-update-form" onSubmit={addIncidentUpdate}>
+                      <input required placeholder="Update" value={incidentUpdateForm.message} onChange={(event) => setIncidentUpdateForm({ ...incidentUpdateForm, message: event.target.value })} />
+                      <select value={incidentUpdateForm.status} onChange={(event) => setIncidentUpdateForm({ ...incidentUpdateForm, status: event.target.value })}>
+                        <option value="Investigating">Investigating</option>
+                        <option value="Identified">Identified</option>
+                        <option value="Monitoring">Monitoring</option>
+                        <option value="Resolved">Resolved</option>
+                      </select>
+                      <label className="checkbox-row">
+                        <input type="checkbox" checked={incidentUpdateForm.private} onChange={(event) => setIncidentUpdateForm({ ...incidentUpdateForm, private: event.target.checked })} />
+                        Private
+                      </label>
+                      <button className="primary" disabled={busy}>Add update</button>
+                    </form>
+                  )}
+                </div>
+              )}
+              {selectedEnvironment && canManageIncidents && (
+                <form className="inline-form incident-form" onSubmit={createIncident}>
+                  <input required placeholder={`Incident title for ${selectedEnvironment.name}`} value={incidentForm.title} onChange={(event) => setIncidentForm({ ...incidentForm, title: event.target.value })} />
+                  <input placeholder="Summary" value={incidentForm.summary} onChange={(event) => setIncidentForm({ ...incidentForm, summary: event.target.value })} />
+                  <input placeholder="Initial update" value={incidentForm.message} onChange={(event) => setIncidentForm({ ...incidentForm, message: event.target.value })} />
+                  <label className="checkbox-row">
+                    <input type="checkbox" checked={incidentForm.private} onChange={(event) => setIncidentForm({ ...incidentForm, private: event.target.checked })} />
+                    Private
+                  </label>
+                  <button className="primary" disabled={busy}>Create incident</button>
+                </form>
+              )}
+            </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Releases</h2>
+                <span>{filteredReleases.length}</span>
+              </div>
+              <div className="table">
+                {filteredReleases.length === 0 ? <p className="empty">No releases</p> : null}
+                {filteredReleases.map((release) => (
+                  <div className="table-row release-dashboard-row" key={release.id}>
+                    <div>
+                      <strong>{release.title}</strong>
+                      <span>{release.projectName} / {release.environmentName} / {release.version}</span>
+                      <span>{release.body}</span>
+                      <span>{release.status === "Published" ? `Published ${formatDate(release.publishedAt)}` : `Drafted ${formatDate(release.createdAt)}`}</span>
+                    </div>
+                    <span className={release.status === "Published" ? "status-on" : "status-off"}>{release.status}</span>
+                    {canPublishReleases && <button onClick={() => publishRelease(release)} disabled={busy || release.status === "Published"}>Publish</button>}
+                  </div>
+                ))}
+              </div>
+              {selectedEnvironment && canManageIncidents && (
+                <form className="inline-form release-form" onSubmit={createRelease}>
+                  <input required placeholder="Release title" value={releaseForm.title} onChange={(event) => setReleaseForm({ ...releaseForm, title: event.target.value })} />
+                  <input required placeholder="Version" value={releaseForm.version} onChange={(event) => setReleaseForm({ ...releaseForm, version: event.target.value })} />
+                  <input required placeholder="Release notes" value={releaseForm.body} onChange={(event) => setReleaseForm({ ...releaseForm, body: event.target.value })} />
+                  <button className="primary" disabled={busy}>Create draft</button>
+                </form>
+              )}
+            </div>
 
             <div className="panel wide">
               <div className="panel-heading">

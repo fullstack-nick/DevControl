@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevControl.Api.Endpoints;
+using DevControl.Api.Monitoring;
 using DevControl.Api.Security;
 using DevControl.Api.Webhooks;
 using DevControl.Application.Health;
@@ -26,6 +27,10 @@ builder.Services.AddDevControlSecurity(builder.Configuration, builder.Environmen
 builder.Services.AddScoped<WebhookSecretService>();
 builder.Services.AddScoped<WebhookEventPublisher>();
 builder.Services.AddScoped<WebhookDeliveryService>();
+builder.Services.AddScoped<MonitorProvisioningService>();
+builder.Services.AddScoped<IncidentAutomationService>();
+builder.Services.AddScoped<MonitorCheckService>();
+builder.Services.AddScoped<SchedulerTickService>();
 
 var app = builder.Build();
 
@@ -108,6 +113,7 @@ app.MapAppRegistryEndpoints();
 app.MapApiKeyEndpoints();
 app.MapFeatureFlagEndpoints();
 app.MapWebhookEndpoints();
+app.MapMonitoringEndpoints();
 app.MapOperatorEndpoints();
 
 app.MapFallbackToFile("index.html");

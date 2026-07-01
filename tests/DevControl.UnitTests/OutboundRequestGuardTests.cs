@@ -21,6 +21,19 @@ public sealed class OutboundRequestGuardTests
     }
 
     [Theory]
+    [InlineData("http://example.com/health", "93.184.216.34", 80)]
+    [InlineData("https://example.com/health", "93.184.216.34", 443)]
+    public async Task ValidateAsync_AllowsPublicHttpAndHttpsMonitorTargets(string url, string ip, int expectedPort)
+    {
+        var guard = new OutboundRequestGuard(new StaticDnsResolver(IPAddress.Parse(ip)));
+
+        var result = await guard.ValidateAsync(new Uri(url), OutboundRequestPolicy.Monitor, CancellationToken.None);
+
+        Assert.True(result.IsAllowed);
+        Assert.Equal(expectedPort, result.Port);
+    }
+
+    [Theory]
     [InlineData("http://example.com/hook", "93.184.216.34")]
     [InlineData("https://example.com:8443/hook", "93.184.216.34")]
     [InlineData("https://localhost/hook", "127.0.0.1")]
@@ -55,6 +68,17 @@ public sealed class OutboundRequestGuardTests
         var result = await guard.ValidateAsync(new Uri("https://example.com/hook"), OutboundRequestPolicy.Webhook, CancellationToken.None);
 
         Assert.False(result.IsAllowed);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_BlocksPrivateMonitorTargets()
+    {
+        var guard = new OutboundRequestGuard(new StaticDnsResolver(IPAddress.Parse("10.0.0.4")));
+
+        var result = await guard.ValidateAsync(new Uri("http://example.com/health"), OutboundRequestPolicy.Monitor, CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 
     private sealed class StaticDnsResolver(params IPAddress[] addresses) : IOutboundDnsResolver

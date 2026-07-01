@@ -11,6 +11,12 @@ public static class WebhookEventTypes
     public const string ApiKeyRotated = "api_key.rotated";
     public const string FeatureFlagCreated = "feature_flag.created";
     public const string FeatureFlagUpdated = "feature_flag.updated";
+    public const string MonitorDown = "monitor.down";
+    public const string MonitorRecovered = "monitor.recovered";
+    public const string IncidentCreated = "incident.created";
+    public const string IncidentUpdated = "incident.updated";
+    public const string IncidentResolved = "incident.resolved";
+    public const string ReleasePublished = "release.published";
 
     private static readonly string[] Ordered =
     [
@@ -20,7 +26,13 @@ public static class WebhookEventTypes
         ApiKeyRevoked,
         ApiKeyRotated,
         FeatureFlagCreated,
-        FeatureFlagUpdated
+        FeatureFlagUpdated,
+        MonitorDown,
+        MonitorRecovered,
+        IncidentCreated,
+        IncidentUpdated,
+        IncidentResolved,
+        ReleasePublished
     ];
 
     private static readonly HashSet<string> Allowed = new(Ordered, StringComparer.Ordinal);

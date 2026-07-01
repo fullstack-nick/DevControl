@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DevControl.Api.Monitoring;
 using DevControl.Api.Security;
 using DevControl.Api.Webhooks;
 using DevControl.Application.Apps;
@@ -38,6 +39,7 @@ public static class AppRegistryEndpoints
         DevControlDbContext dbContext,
         RegistrationTokenService tokenService,
         AuditLogWriter auditLogWriter,
+        MonitorProvisioningService monitorProvisioningService,
         WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
@@ -148,6 +150,7 @@ public static class AppRegistryEndpoints
             details.ImageDigest,
             details.CapabilitiesJson,
             now));
+        await monitorProvisioningService.EnsureManagedMonitorAsync(liveApp, token.CreatedByUserId, now, cancellationToken);
         token.MarkUsed(now);
 
         auditLogWriter.Add(
