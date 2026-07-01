@@ -10,6 +10,10 @@ inputs:
     description: Build configuration used for the CLI package.
     required: false
     default: Release
+  sdk-output:
+    description: Optional directory where a DevControl.Sdk NuGet package should be packed.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -36,3 +40,14 @@ runs:
           DevControl.Cli
         echo "$tool_dir" >> "$GITHUB_PATH"
         "$tool_dir/devcontrol" --help
+
+    - name: Pack DevControl SDK
+      if: ${{ inputs.sdk-output != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        repo_root="$(cd "${{ github.action_path }}/../../.." && pwd)"
+        mkdir -p "${{ inputs.sdk-output }}"
+        dotnet pack "$repo_root/src/DevControl.Sdk/DevControl.Sdk.csproj" \
+          --configuration "${{ inputs.configuration }}" \
+          --output "${{ inputs.sdk-output }}"
