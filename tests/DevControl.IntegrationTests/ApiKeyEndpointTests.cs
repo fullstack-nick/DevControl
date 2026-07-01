@@ -236,6 +236,10 @@ public sealed partial class ApiKeyEndpointTests
             var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
             await dbContext.Database.ExecuteSqlRawAsync("""
                 DROP TABLE IF EXISTS
+                    webhook_delivery_attempts,
+                    webhook_deliveries,
+                    webhook_events,
+                    webhook_endpoints,
                     feature_flag_changes,
                     feature_flags,
                     api_key_rate_limit_windows,

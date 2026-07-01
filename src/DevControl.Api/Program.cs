@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using DevControl.Api.Endpoints;
 using DevControl.Api.Security;
+using DevControl.Api.Webhooks;
 using DevControl.Application.Health;
 using DevControl.Infrastructure.Database;
 using Microsoft.AspNetCore.DataProtection;
@@ -22,6 +23,9 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<DevControlDbContext>()
     .SetApplicationName("DevControl");
 builder.Services.AddDevControlSecurity(builder.Configuration, builder.Environment);
+builder.Services.AddScoped<WebhookSecretService>();
+builder.Services.AddScoped<WebhookEventPublisher>();
+builder.Services.AddScoped<WebhookDeliveryService>();
 
 var app = builder.Build();
 
@@ -103,6 +107,7 @@ app.MapTenantEndpoints();
 app.MapAppRegistryEndpoints();
 app.MapApiKeyEndpoints();
 app.MapFeatureFlagEndpoints();
+app.MapWebhookEndpoints();
 app.MapOperatorEndpoints();
 
 app.MapFallbackToFile("index.html");

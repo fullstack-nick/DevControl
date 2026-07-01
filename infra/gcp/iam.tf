@@ -25,6 +25,12 @@ resource "google_secret_manager_secret_iam_member" "runtime_can_read_postgres_pa
   member    = "serviceAccount:${google_service_account.runtime.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "runtime_can_read_scheduler_secret" {
+  secret_id = google_secret_manager_secret.scheduler_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "vm_can_read_postgres_password" {
   secret_id = google_secret_manager_secret.postgres_password.id
   role      = "roles/secretmanager.secretAccessor"

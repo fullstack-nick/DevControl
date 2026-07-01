@@ -1,5 +1,7 @@
 using DevControl.Application.Email;
+using DevControl.Application.Outbound;
 using DevControl.Infrastructure.Email;
+using DevControl.Infrastructure.Outbound;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +20,9 @@ public static class InfrastructureServiceCollectionExtensions
         {
             options.UseNpgsql(connectionString);
         });
+        services.AddSingleton<IOutboundDnsResolver, SystemOutboundDnsResolver>();
+        services.AddSingleton<OutboundRequestGuard>();
+        services.AddSingleton<ISafeOutboundHttpClient, SafeOutboundHttpClient>();
 
         var emailConfiguration = EmailConfiguration.FromConfiguration(configuration);
         services.AddSingleton(emailConfiguration);

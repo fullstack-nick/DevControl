@@ -175,6 +175,51 @@ type FeatureFlagChange = {
   changedAt: string;
 };
 
+type WebhookEndpoint = {
+  id: string;
+  name: string;
+  url: string;
+  secretPrefix: string;
+  eventTypes: string[];
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  environmentId: string;
+  environmentName: string;
+  environmentSlug: string;
+  isPaused: boolean;
+  createdAt: string;
+  updatedAt: string;
+  pausedAt?: string;
+  lastDeliveryAt?: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+};
+
+type WebhookEndpointCreateResponse = WebhookEndpoint & {
+  secret: string;
+};
+
+type WebhookDelivery = {
+  id: string;
+  endpointId: string;
+  eventId: string;
+  eventType: string;
+  resourceType: string;
+  resourceId?: string;
+  status: string;
+  attemptCount: number;
+  maxAttempts: number;
+  nextAttemptAt?: string;
+  lastAttemptAt?: string;
+  completedAt?: string;
+  lastStatusCode?: number;
+  lastError: string;
+  lastResponsePreview: string;
+  lastResponseTruncated: boolean;
+  createdAt: string;
+};
+
 type MeResponse = {
   user: User;
   organizations: Organization[];
@@ -190,6 +235,16 @@ const roleOrder: Record<Role, number> = {
 };
 
 const roles: Role[] = ["Owner", "Admin", "Developer", "Viewer"];
+
+const webhookEventTypes = [
+  "webhook.test",
+  "app.registered",
+  "api_key.created",
+  "api_key.revoked",
+  "api_key.rotated",
+  "feature_flag.created",
+  "feature_flag.updated"
+];
 
 let csrfToken: string | undefined;
 
@@ -291,9 +346,13 @@ export default function App() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
   const [featureFlagChanges, setFeatureFlagChanges] = useState<FeatureFlagChange[]>([]);
+  const [webhookEndpoints, setWebhookEndpoints] = useState<WebhookEndpoint[]>([]);
+  const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [historyFlagId, setHistoryFlagId] = useState<string>("");
+  const [selectedWebhookEndpointId, setSelectedWebhookEndpointId] = useState<string>("");
   const [createdToken, setCreatedToken] = useState<RegistrationTokenCreateResponse | undefined>();
   const [createdApiKey, setCreatedApiKey] = useState<ApiKeyCreateResponse | undefined>();
+  const [createdWebhookEndpoint, setCreatedWebhookEndpoint] = useState<WebhookEndpointCreateResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -305,6 +364,11 @@ export default function App() {
   const [apiKeyForm, setApiKeyForm] = useState({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
   const [flagForm, setFlagForm] = useState({ key: "", name: "", description: "", kind: "FeatureFlag", enabled: false, reason: "" });
   const [flagReasons, setFlagReasons] = useState<Record<string, string>>({});
+  const [webhookForm, setWebhookForm] = useState({
+    name: "",
+    url: "",
+    eventTypes: Object.fromEntries(webhookEventTypes.map((eventType) => [eventType, eventType === "webhook.test"])) as Record<string, boolean>
+  });
   const invitationToken = useMemo(inviteTokenFromPath, []);
 
   const selectedOrg = me?.organizations.find((organization) => organization.id === selectedOrgId);
@@ -331,6 +395,14 @@ export default function App() {
 
     return selectedProjectId ? apiKey.projectId === selectedProjectId : true;
   });
+  const filteredWebhookEndpoints = webhookEndpoints.filter((endpoint) => {
+    if (selectedEnvironmentId) {
+      return endpoint.environmentId === selectedEnvironmentId;
+    }
+
+    return selectedProjectId ? endpoint.projectId === selectedProjectId : true;
+  });
+  const selectedWebhookEndpoint = webhookEndpoints.find((endpoint) => endpoint.id === selectedWebhookEndpointId);
 
   async function loadMe(preferredOrganizationId?: string) {
     try {
@@ -364,20 +436,24 @@ export default function App() {
       setLiveApps([]);
       setRegistrationTokens([]);
       setApiKeys([]);
+      setWebhookEndpoints([]);
+      setWebhookDeliveries([]);
       setFeatureFlags([]);
       setFeatureFlagChanges([]);
       setHistoryFlagId("");
+      setSelectedWebhookEndpointId("");
       return;
     }
 
     const selected = me?.organizations.find((organization) => organization.id === organizationId);
-    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, auditPayload, controlActionPayload] = await Promise.all([
+    const [projectPayload, appPayload, memberPayload, invitationPayload, tokenPayload, apiKeyPayload, webhookPayload, auditPayload, controlActionPayload] = await Promise.all([
       api<Project[]>(`/api/organizations/${organizationId}/projects`),
       api<LiveApp[]>(`/api/organizations/${organizationId}/apps`),
       roleAtLeast(selected?.role, "Admin") ? api<Member[]>(`/api/organizations/${organizationId}/members`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<Invitation[]>(`/api/organizations/${organizationId}/invitations`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<RegistrationToken[]>(`/api/organizations/${organizationId}/registration-tokens`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Admin") ? api<ApiKey[]>(`/api/organizations/${organizationId}/api-keys`) : Promise.resolve([]),
+      api<WebhookEndpoint[]>(`/api/organizations/${organizationId}/webhook-endpoints`),
       roleAtLeast(selected?.role, "Admin") ? api<AuditLog[]>(`/api/organizations/${organizationId}/audit-logs`) : Promise.resolve([]),
       roleAtLeast(selected?.role, "Developer") ? api<ControlAction[]>(`/api/organizations/${organizationId}/control-actions`) : Promise.resolve([])
     ]);
@@ -388,6 +464,7 @@ export default function App() {
     setInvitations(invitationPayload);
     setRegistrationTokens(tokenPayload);
     setApiKeys(apiKeyPayload);
+    setWebhookEndpoints(webhookPayload);
     setAuditLogs(auditPayload);
     setControlActions(controlActionPayload);
     const nextProjectId = selectedProjectId && projectPayload.some((project) => project.id === selectedProjectId)
@@ -396,6 +473,11 @@ export default function App() {
     setSelectedProjectId(nextProjectId);
     setCreatedToken(undefined);
     setCreatedApiKey(undefined);
+    setCreatedWebhookEndpoint(undefined);
+    if (selectedWebhookEndpointId && !webhookPayload.some((endpoint) => endpoint.id === selectedWebhookEndpointId)) {
+      setSelectedWebhookEndpointId("");
+      setWebhookDeliveries([]);
+    }
   }
 
   async function refreshEnvironments(organizationId: string, projectId: string) {
@@ -428,6 +510,16 @@ export default function App() {
       setHistoryFlagId("");
       setFeatureFlagChanges([]);
     }
+  }
+
+  async function loadWebhookDeliveries(endpointId: string) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    const deliveries = await api<WebhookDelivery[]>(`/api/organizations/${selectedOrgId}/webhook-endpoints/${endpointId}/deliveries`);
+    setSelectedWebhookEndpointId(endpointId);
+    setWebhookDeliveries(deliveries);
   }
 
   useEffect(() => {
@@ -464,6 +556,16 @@ export default function App() {
       setHistoryFlagId("");
     }
   }, [authenticated, selectedOrgId, selectedProjectId, selectedEnvironmentId]);
+
+  useEffect(() => {
+    if (authenticated && selectedOrgId && selectedWebhookEndpointId) {
+      void loadWebhookDeliveries(selectedWebhookEndpointId).catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Failed to load webhook deliveries.");
+      });
+    } else {
+      setWebhookDeliveries([]);
+    }
+  }, [authenticated, selectedOrgId, selectedWebhookEndpointId]);
 
   async function runMutation(action: () => Promise<void>) {
     setBusy(true);
@@ -596,6 +698,80 @@ export default function App() {
       await refreshOrgData(selectedOrgId);
       setCreatedApiKey(apiKey);
       setNotice("API key created. Copy it now; it will not be shown again.");
+    });
+  }
+
+  async function createWebhookEndpoint(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedOrgId || !selectedProjectId || !selectedEnvironmentId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const eventTypes = webhookEventTypes.filter((eventType) => webhookForm.eventTypes[eventType]);
+      const endpoint = await api<WebhookEndpointCreateResponse>(
+        `/api/organizations/${selectedOrgId}/projects/${selectedProjectId}/environments/${selectedEnvironmentId}/webhook-endpoints`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: webhookForm.name,
+            url: webhookForm.url,
+            eventTypes
+          })
+        });
+      setWebhookForm({
+        name: "",
+        url: "",
+        eventTypes: Object.fromEntries(webhookEventTypes.map((eventType) => [eventType, eventType === "webhook.test"])) as Record<string, boolean>
+      });
+      await refreshOrgData(selectedOrgId);
+      setCreatedWebhookEndpoint(endpoint);
+      setSelectedWebhookEndpointId(endpoint.id);
+      setNotice("Webhook endpoint created. Copy the signing secret now; it will not be shown again.");
+    });
+  }
+
+  async function changeWebhookPause(endpoint: WebhookEndpoint) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const action = endpoint.isPaused ? "resume" : "pause";
+      await api<WebhookEndpoint>(`/api/organizations/${selectedOrgId}/webhook-endpoints/${endpoint.id}/${action}`, { method: "POST" });
+      await refreshOrgData(selectedOrgId);
+      setNotice(endpoint.isPaused ? "Webhook endpoint resumed." : "Webhook endpoint paused.");
+    });
+  }
+
+  async function testWebhookEndpoint(endpoint: WebhookEndpoint) {
+    if (!selectedOrgId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const delivery = await api<WebhookDelivery>(
+        `/api/organizations/${selectedOrgId}/webhook-endpoints/${endpoint.id}/test-deliveries`,
+        { method: "POST" });
+      setSelectedWebhookEndpointId(endpoint.id);
+      await loadWebhookDeliveries(endpoint.id);
+      await refreshOrgData(selectedOrgId);
+      setNotice(`Webhook test delivery ${delivery.status}.`);
+    });
+  }
+
+  async function retryWebhookDelivery(delivery: WebhookDelivery) {
+    if (!selectedOrgId || !selectedWebhookEndpointId) {
+      return;
+    }
+
+    await runMutation(async () => {
+      const retried = await api<WebhookDelivery>(
+        `/api/organizations/${selectedOrgId}/webhook-deliveries/${delivery.id}/retry`,
+        { method: "POST" });
+      await loadWebhookDeliveries(selectedWebhookEndpointId);
+      await refreshOrgData(selectedOrgId);
+      setNotice(`Webhook retry ${retried.status}.`);
     });
   }
 
@@ -989,6 +1165,99 @@ export default function App() {
                     </select>
                     <input type="number" min="1" max="600" value={apiKeyForm.rateLimitPerMinute} onChange={(event) => setApiKeyForm({ ...apiKeyForm, rateLimitPerMinute: event.target.value })} />
                     <button className="primary" disabled={busy}>Create API key</button>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {canManageOrg && (
+              <div className="panel wide">
+                <div className="panel-heading">
+                  <h2>Webhooks</h2>
+                  <span>{filteredWebhookEndpoints.length}</span>
+                </div>
+                {createdWebhookEndpoint && (
+                  <div className="secret-box">
+                    <strong>Copy this webhook signing secret now</strong>
+                    <code>{createdWebhookEndpoint.secret}</code>
+                    <span>DevControl signs deliveries with HMAC-SHA256 in X-DevControl-Signature.</span>
+                  </div>
+                )}
+                <div className="table">
+                  {filteredWebhookEndpoints.length === 0 ? <p className="empty">No webhook endpoints</p> : null}
+                  {filteredWebhookEndpoints.map((endpoint) => (
+                    <div className="table-row webhook-row" key={endpoint.id}>
+                      <div>
+                        <strong>{endpoint.name}</strong>
+                        <span>{endpoint.projectName} / {endpoint.environmentName}</span>
+                        <span>{endpoint.url}</span>
+                        <span>{endpoint.secretPrefix}... / {endpoint.eventTypes.join(", ")}</span>
+                        <span>Last delivery {formatDate(endpoint.lastDeliveryAt)}</span>
+                      </div>
+                      <div className="usage-metrics">
+                        <span className={endpoint.isPaused ? "status-off" : "status-on"}>{endpoint.isPaused ? "Paused" : "Active"}</span>
+                        <span>Last success {formatDate(endpoint.lastSuccessAt)}</span>
+                        <span>Last failure {formatDate(endpoint.lastFailureAt)}</span>
+                      </div>
+                      <div className="actions">
+                        <button onClick={() => void loadWebhookDeliveries(endpoint.id)} disabled={busy}>Deliveries</button>
+                        <button onClick={() => testWebhookEndpoint(endpoint)} disabled={busy || endpoint.isPaused}>Test</button>
+                        <button onClick={() => changeWebhookPause(endpoint)} disabled={busy}>{endpoint.isPaused ? "Resume" : "Pause"}</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {selectedWebhookEndpoint && (
+                  <div className="delivery-history">
+                    <strong>{selectedWebhookEndpoint.name} deliveries</strong>
+                    {webhookDeliveries.length === 0 ? <p className="empty">No deliveries</p> : null}
+                    {webhookDeliveries.map((delivery) => (
+                      <div className="table-row webhook-delivery-row" key={delivery.id}>
+                        <div>
+                          <strong>{delivery.eventType}</strong>
+                          <span>{delivery.status} / {delivery.attemptCount} of {delivery.maxAttempts}</span>
+                          <span>{delivery.resourceType}{delivery.resourceId ? ` / ${delivery.resourceId}` : ""}</span>
+                          <span>Created {formatDate(delivery.createdAt)}</span>
+                        </div>
+                        <div className="usage-metrics">
+                          <span>HTTP {delivery.lastStatusCode ?? "-"}</span>
+                          <span>Next {formatDate(delivery.nextAttemptAt)}</span>
+                          <span>Last {formatDate(delivery.lastAttemptAt)}</span>
+                        </div>
+                        <div>
+                          <span>{delivery.lastError || "No error"}</span>
+                          <span>{delivery.lastResponsePreview || "No response preview"}{delivery.lastResponseTruncated ? "..." : ""}</span>
+                        </div>
+                        <button
+                          onClick={() => retryWebhookDelivery(delivery)}
+                          disabled={busy || delivery.status === "Succeeded" || delivery.status === "SkippedPaused"}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selectedEnvironment && (
+                  <form className="inline-form webhook-form" onSubmit={createWebhookEndpoint}>
+                    <input required placeholder={`Name for ${selectedEnvironment.name}`} value={webhookForm.name} onChange={(event) => setWebhookForm({ ...webhookForm, name: event.target.value })} />
+                    <input required placeholder="https://example.com/webhooks/devcontrol" value={webhookForm.url} onChange={(event) => setWebhookForm({ ...webhookForm, url: event.target.value })} />
+                    <div className="event-grid">
+                      {webhookEventTypes.map((eventType) => (
+                        <label className="checkbox-row" key={eventType}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(webhookForm.eventTypes[eventType])}
+                            onChange={(event) => setWebhookForm({
+                              ...webhookForm,
+                              eventTypes: { ...webhookForm.eventTypes, [eventType]: event.target.checked }
+                            })}
+                          />
+                          {eventType}
+                        </label>
+                      ))}
+                    </div>
+                    <button className="primary" disabled={busy}>Create webhook</button>
                   </form>
                 )}
               </div>

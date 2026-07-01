@@ -4,6 +4,12 @@ resource "random_password" "postgres" {
   override_special = "_-"
 }
 
+resource "random_password" "scheduler" {
+  length           = 32
+  special          = true
+  override_special = "_-"
+}
+
 resource "google_secret_manager_secret" "postgres_password" {
   secret_id = "${local.app_name}-postgres-password"
 
@@ -19,6 +25,23 @@ resource "google_secret_manager_secret" "postgres_password" {
 resource "google_secret_manager_secret_version" "postgres_password" {
   secret      = google_secret_manager_secret.postgres_password.id
   secret_data = random_password.postgres.result
+}
+
+resource "google_secret_manager_secret" "scheduler_secret" {
+  secret_id = "${local.app_name}-scheduler-secret"
+
+  labels = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_version" "scheduler_secret" {
+  secret      = google_secret_manager_secret.scheduler_secret.id
+  secret_data = random_password.scheduler.result
 }
 
 resource "google_secret_manager_secret" "google_oauth_client_secret" {

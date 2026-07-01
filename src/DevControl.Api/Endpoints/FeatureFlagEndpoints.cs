@@ -4,7 +4,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using DevControl.Api.Security;
+using DevControl.Api.Webhooks;
 using DevControl.Application.Security;
+using DevControl.Application.Webhooks;
 using DevControl.Domain.Entities;
 using DevControl.Domain.Enums;
 using DevControl.Infrastructure.Database;
@@ -162,6 +164,7 @@ public static class FeatureFlagEndpoints
         TenantAccessService tenantAccess,
         DevControlDbContext dbContext,
         AuditLogWriter auditLogWriter,
+        WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -251,6 +254,28 @@ public static class FeatureFlagEndpoints
             new { flag.Key, flag.Name, flag.Kind, flag.IsEnabled, reason },
             projectId,
             environmentId);
+        await webhookEventPublisher.PublishAsync(
+            organizationId,
+            projectId,
+            environmentId,
+            WebhookEventTypes.FeatureFlagCreated,
+            "feature_flag",
+            flag.Id.ToString(),
+            actor.Id,
+            actor.Email,
+            new
+            {
+                flag.Id,
+                flag.Key,
+                flag.Name,
+                flag.Kind,
+                flag.IsEnabled,
+                reason,
+                projectSlug = scope.Project.Slug,
+                environmentSlug = scope.Environment.Slug
+            },
+            now,
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Results.Created(
@@ -266,6 +291,7 @@ public static class FeatureFlagEndpoints
         TenantAccessService tenantAccess,
         DevControlDbContext dbContext,
         AuditLogWriter auditLogWriter,
+        WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -338,6 +364,29 @@ public static class FeatureFlagEndpoints
             new { flag.Key, flag.Name, flag.Kind, oldValue, newValue = nextEnabled, reason },
             flag.ProjectId,
             flag.EnvironmentId);
+        await webhookEventPublisher.PublishAsync(
+            organizationId,
+            flag.ProjectId,
+            flag.EnvironmentId,
+            WebhookEventTypes.FeatureFlagUpdated,
+            "feature_flag",
+            flag.Id.ToString(),
+            actor.Id,
+            actor.Email,
+            new
+            {
+                flag.Id,
+                flag.Key,
+                flag.Name,
+                flag.Kind,
+                oldValue,
+                newValue = nextEnabled,
+                reason,
+                projectSlug = scope.Project.Slug,
+                environmentSlug = scope.Environment.Slug
+            },
+            now,
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Results.Ok(ToFeatureFlagResponse(flag, scope.Project, scope.Environment));

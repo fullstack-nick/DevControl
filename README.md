@@ -84,6 +84,12 @@ governance, runtime flag snapshots with ETags, and the first cached local
 evaluation C# SDK. See
 [docs/stage-5-feature-flags-sdk.md](docs/stage-5-feature-flags-sdk.md).
 
+## Stage 6 Safe Outbound HTTP and Webhooks
+
+Stage 6 adds the SSRF-safe outbound HTTP layer, HMAC-signed webhooks, test
+delivery, pause/resume, delivery attempts, and bounded retry batches. See
+[docs/stage-6-safe-outbound-webhooks.md](docs/stage-6-safe-outbound-webhooks.md).
+
 ## GCP Stage 1
 
 Use [docs/gcp-stage-1.md](docs/gcp-stage-1.md) for project bootstrap,

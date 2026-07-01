@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using DevControl.Api.Security;
+using DevControl.Api.Webhooks;
 using DevControl.Application.Security;
+using DevControl.Application.Webhooks;
 using DevControl.Domain.Entities;
 using DevControl.Domain.Enums;
 using DevControl.Infrastructure.Database;
@@ -141,6 +143,7 @@ public static class ApiKeyEndpoints
         DevControlDbContext dbContext,
         AuditLogWriter auditLogWriter,
         ApiKeySecretService apiKeySecretService,
+        WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -219,6 +222,27 @@ public static class ApiKeyEndpoints
             new { apiKey.Name, apiKey.KeyPrefix, scopes, apiKey.RateLimitPerMinute, projectSlug = project.Slug, environmentSlug = environment.Slug },
             projectId,
             environmentId);
+        await webhookEventPublisher.PublishAsync(
+            organizationId,
+            projectId,
+            environmentId,
+            WebhookEventTypes.ApiKeyCreated,
+            "api_key",
+            apiKey.Id.ToString(),
+            actor.Id,
+            actor.Email,
+            new
+            {
+                apiKey.Id,
+                apiKey.Name,
+                apiKey.KeyPrefix,
+                scopes,
+                apiKey.RateLimitPerMinute,
+                projectSlug = project.Slug,
+                environmentSlug = environment.Slug
+            },
+            now,
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -234,6 +258,7 @@ public static class ApiKeyEndpoints
         TenantAccessService tenantAccess,
         DevControlDbContext dbContext,
         AuditLogWriter auditLogWriter,
+        WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -274,6 +299,23 @@ public static class ApiKeyEndpoints
             new { apiKey.Name, apiKey.KeyPrefix },
             apiKey.ProjectId,
             apiKey.EnvironmentId);
+        await webhookEventPublisher.PublishAsync(
+            organizationId,
+            apiKey.ProjectId,
+            apiKey.EnvironmentId,
+            WebhookEventTypes.ApiKeyRevoked,
+            "api_key",
+            apiKey.Id.ToString(),
+            actor.Id,
+            actor.Email,
+            new
+            {
+                apiKey.Id,
+                apiKey.Name,
+                apiKey.KeyPrefix
+            },
+            now,
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Results.Ok(new ApiKeyRevokeResponse(apiKey.Id, apiKey.RevokedAt));
@@ -287,6 +329,7 @@ public static class ApiKeyEndpoints
         DevControlDbContext dbContext,
         AuditLogWriter auditLogWriter,
         ApiKeySecretService apiKeySecretService,
+        WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -352,6 +395,25 @@ public static class ApiKeyEndpoints
             new { oldKeyPrefix = apiKey.KeyPrefix, newKeyPrefix = rotated.KeyPrefix, scopes = ApiKeyScopes.FromJson(apiKey.ScopesJson) },
             apiKey.ProjectId,
             apiKey.EnvironmentId);
+        await webhookEventPublisher.PublishAsync(
+            organizationId,
+            apiKey.ProjectId,
+            apiKey.EnvironmentId,
+            WebhookEventTypes.ApiKeyRotated,
+            "api_key",
+            apiKey.Id.ToString(),
+            actor.Id,
+            actor.Email,
+            new
+            {
+                oldApiKeyId = apiKey.Id,
+                newApiKeyId = rotated.Id,
+                oldKeyPrefix = apiKey.KeyPrefix,
+                newKeyPrefix = rotated.KeyPrefix,
+                scopes = ApiKeyScopes.FromJson(apiKey.ScopesJson)
+            },
+            now,
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Results.Ok(ToApiKeyCreateResponse(rotated, project, environment, secret.Secret));

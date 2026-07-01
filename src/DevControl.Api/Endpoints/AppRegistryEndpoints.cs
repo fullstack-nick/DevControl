@@ -1,7 +1,9 @@
 using System.Text.Json;
 using DevControl.Api.Security;
+using DevControl.Api.Webhooks;
 using DevControl.Application.Apps;
 using DevControl.Application.Security;
+using DevControl.Application.Webhooks;
 using DevControl.Domain.Entities;
 using DevControl.Domain.Enums;
 using DevControl.Infrastructure.Database;
@@ -36,6 +38,7 @@ public static class AppRegistryEndpoints
         DevControlDbContext dbContext,
         RegistrationTokenService tokenService,
         AuditLogWriter auditLogWriter,
+        WebhookEventPublisher webhookEventPublisher,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -166,6 +169,29 @@ public static class AppRegistryEndpoints
             },
             token.ProjectId,
             token.EnvironmentId);
+        await webhookEventPublisher.PublishAsync(
+            token.OrganizationId,
+            token.ProjectId,
+            token.EnvironmentId,
+            WebhookEventTypes.AppRegistered,
+            "live_app",
+            liveApp.Id.ToString(),
+            null,
+            "system",
+            new
+            {
+                liveApp.Id,
+                details.Repo,
+                details.Environment,
+                details.ServiceUrl,
+                details.HealthUrl,
+                details.CommitSha,
+                details.Version,
+                details.ImageDigest,
+                capabilities = details.Capabilities
+            },
+            now,
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Results.Ok(ToLiveAppResponse(liveApp, project.Name, project.Slug, environment.Name, environment.Slug, details.Capabilities));

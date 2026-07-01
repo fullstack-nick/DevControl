@@ -43,6 +43,14 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
 
     public DbSet<FeatureFlagChange> FeatureFlagChanges => Set<FeatureFlagChange>();
 
+    public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
+
+    public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
+
+    public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
+
+    public DbSet<WebhookDeliveryAttempt> WebhookDeliveryAttempts => Set<WebhookDeliveryAttempt>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -64,6 +72,10 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
         ConfigureApiKeyRateLimitWindow(modelBuilder);
         ConfigureFeatureFlag(modelBuilder);
         ConfigureFeatureFlagChange(modelBuilder);
+        ConfigureWebhookEndpoint(modelBuilder);
+        ConfigureWebhookEvent(modelBuilder);
+        ConfigureWebhookDelivery(modelBuilder);
+        ConfigureWebhookDeliveryAttempt(modelBuilder);
         ConfigureDataProtectionKey(modelBuilder);
     }
 
@@ -780,6 +792,237 @@ public sealed class DevControlDbContext(DbContextOptions<DevControlDbContext> op
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(change => change.ChangedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureWebhookEndpoint(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<WebhookEndpoint>(entity =>
+        {
+            entity.ToTable("webhook_endpoints");
+            entity.HasKey(endpoint => endpoint.Id);
+
+            entity.Property(endpoint => endpoint.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(endpoint => endpoint.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(endpoint => endpoint.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(endpoint => endpoint.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(endpoint => endpoint.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(endpoint => endpoint.Url).HasColumnName("url").HasMaxLength(1000).IsRequired();
+            entity.Property(endpoint => endpoint.SecretPrefix).HasColumnName("secret_prefix").HasMaxLength(32).IsRequired();
+            entity.Property(endpoint => endpoint.ProtectedSecret).HasColumnName("protected_secret").HasColumnType("text").IsRequired();
+            entity.Property(endpoint => endpoint.EventTypesJson).HasColumnName("event_types_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(endpoint => endpoint.IsPaused).HasColumnName("is_paused").IsRequired();
+            entity.Property(endpoint => endpoint.CreatedByUserId).HasColumnName("created_by_user_id").IsRequired();
+            entity.Property(endpoint => endpoint.PausedByUserId).HasColumnName("paused_by_user_id");
+            entity.Property(endpoint => endpoint.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(endpoint => endpoint.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.Property(endpoint => endpoint.PausedAt).HasColumnName("paused_at");
+            entity.Property(endpoint => endpoint.LastDeliveryAt).HasColumnName("last_delivery_at");
+            entity.Property(endpoint => endpoint.LastSuccessAt).HasColumnName("last_success_at");
+            entity.Property(endpoint => endpoint.LastFailureAt).HasColumnName("last_failure_at");
+
+            entity.HasIndex(endpoint => endpoint.OrganizationId);
+            entity.HasIndex(endpoint => endpoint.ProjectId);
+            entity.HasIndex(endpoint => endpoint.EnvironmentId);
+            entity.HasIndex(endpoint => new { endpoint.OrganizationId, endpoint.ProjectId, endpoint.EnvironmentId, endpoint.CreatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(endpoint => endpoint.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(endpoint => endpoint.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(endpoint => endpoint.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(endpoint => endpoint.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(endpoint => endpoint.PausedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureWebhookEvent(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<WebhookEvent>(entity =>
+        {
+            entity.ToTable("webhook_events");
+            entity.HasKey(webhookEvent => webhookEvent.Id);
+
+            entity.Property(webhookEvent => webhookEvent.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(webhookEvent => webhookEvent.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(webhookEvent => webhookEvent.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(webhookEvent => webhookEvent.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(webhookEvent => webhookEvent.EventType).HasColumnName("event_type").HasMaxLength(120).IsRequired();
+            entity.Property(webhookEvent => webhookEvent.ResourceType).HasColumnName("resource_type").HasMaxLength(80).IsRequired();
+            entity.Property(webhookEvent => webhookEvent.ResourceId).HasColumnName("resource_id").HasMaxLength(120);
+            entity.Property(webhookEvent => webhookEvent.ActorUserId).HasColumnName("actor_user_id");
+            entity.Property(webhookEvent => webhookEvent.ActorEmail).HasColumnName("actor_email").HasMaxLength(320).IsRequired();
+            entity.Property(webhookEvent => webhookEvent.PayloadJson).HasColumnName("payload_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(webhookEvent => webhookEvent.OccurredAt).HasColumnName("occurred_at").IsRequired();
+            entity.Property(webhookEvent => webhookEvent.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasIndex(webhookEvent => new { webhookEvent.OrganizationId, webhookEvent.OccurredAt });
+            entity.HasIndex(webhookEvent => new { webhookEvent.EnvironmentId, webhookEvent.EventType, webhookEvent.OccurredAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(webhookEvent => webhookEvent.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(webhookEvent => webhookEvent.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(webhookEvent => webhookEvent.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(webhookEvent => webhookEvent.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureWebhookDelivery(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<WebhookDelivery>(entity =>
+        {
+            entity.ToTable("webhook_deliveries");
+            entity.HasKey(delivery => delivery.Id);
+
+            entity.Property(delivery => delivery.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(delivery => delivery.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(delivery => delivery.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(delivery => delivery.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(delivery => delivery.WebhookEndpointId).HasColumnName("webhook_endpoint_id").IsRequired();
+            entity.Property(delivery => delivery.WebhookEventId).HasColumnName("webhook_event_id").IsRequired();
+            entity.Property(delivery => delivery.Status)
+                .HasColumnName("status")
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(delivery => delivery.AttemptCount).HasColumnName("attempt_count").IsRequired();
+            entity.Property(delivery => delivery.MaxAttempts).HasColumnName("max_attempts").IsRequired();
+            entity.Property(delivery => delivery.NextAttemptAt).HasColumnName("next_attempt_at");
+            entity.Property(delivery => delivery.LastAttemptAt).HasColumnName("last_attempt_at");
+            entity.Property(delivery => delivery.CompletedAt).HasColumnName("completed_at");
+            entity.Property(delivery => delivery.LastStatusCode).HasColumnName("last_status_code");
+            entity.Property(delivery => delivery.LastError).HasColumnName("last_error").HasMaxLength(1000).IsRequired();
+            entity.Property(delivery => delivery.LastResponsePreview).HasColumnName("last_response_preview").HasMaxLength(16384).IsRequired();
+            entity.Property(delivery => delivery.LastResponseTruncated).HasColumnName("last_response_truncated").IsRequired();
+            entity.Property(delivery => delivery.ProcessingLeaseId).HasColumnName("processing_lease_id").HasMaxLength(120);
+            entity.Property(delivery => delivery.ProcessingLeaseExpiresAt).HasColumnName("processing_lease_expires_at");
+            entity.Property(delivery => delivery.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(delivery => delivery.UpdatedAt).HasColumnName("updated_at").IsRequired();
+
+            entity.HasIndex(delivery => delivery.OrganizationId);
+            entity.HasIndex(delivery => delivery.WebhookEndpointId);
+            entity.HasIndex(delivery => delivery.WebhookEventId);
+            entity.HasIndex(delivery => new { delivery.Status, delivery.NextAttemptAt });
+            entity.HasIndex(delivery => new { delivery.OrganizationId, delivery.CreatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(delivery => delivery.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(delivery => delivery.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(delivery => delivery.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<WebhookEndpoint>()
+                .WithMany()
+                .HasForeignKey(delivery => delivery.WebhookEndpointId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<WebhookEvent>()
+                .WithMany()
+                .HasForeignKey(delivery => delivery.WebhookEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureWebhookDeliveryAttempt(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<WebhookDeliveryAttempt>(entity =>
+        {
+            entity.ToTable("webhook_delivery_attempts");
+            entity.HasKey(attempt => attempt.Id);
+
+            entity.Property(attempt => attempt.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(attempt => attempt.OrganizationId).HasColumnName("organization_id").IsRequired();
+            entity.Property(attempt => attempt.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(attempt => attempt.EnvironmentId).HasColumnName("environment_id").IsRequired();
+            entity.Property(attempt => attempt.WebhookEndpointId).HasColumnName("webhook_endpoint_id").IsRequired();
+            entity.Property(attempt => attempt.WebhookEventId).HasColumnName("webhook_event_id").IsRequired();
+            entity.Property(attempt => attempt.WebhookDeliveryId).HasColumnName("webhook_delivery_id").IsRequired();
+            entity.Property(attempt => attempt.AttemptNumber).HasColumnName("attempt_number").IsRequired();
+            entity.Property(attempt => attempt.ResultKind).HasColumnName("result_kind").HasMaxLength(40).IsRequired();
+            entity.Property(attempt => attempt.Succeeded).HasColumnName("succeeded").IsRequired();
+            entity.Property(attempt => attempt.StatusCode).HasColumnName("status_code");
+            entity.Property(attempt => attempt.DurationMilliseconds).HasColumnName("duration_milliseconds").IsRequired();
+            entity.Property(attempt => attempt.Error).HasColumnName("error").HasMaxLength(1000).IsRequired();
+            entity.Property(attempt => attempt.ResponsePreview).HasColumnName("response_preview").HasMaxLength(16384).IsRequired();
+            entity.Property(attempt => attempt.ResponseTruncated).HasColumnName("response_truncated").IsRequired();
+            entity.Property(attempt => attempt.ResponseBytesRead).HasColumnName("response_bytes_read").IsRequired();
+            entity.Property(attempt => attempt.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasIndex(attempt => attempt.OrganizationId);
+            entity.HasIndex(attempt => attempt.WebhookEndpointId);
+            entity.HasIndex(attempt => attempt.WebhookEventId);
+            entity.HasIndex(attempt => new { attempt.WebhookDeliveryId, attempt.AttemptNumber }).IsUnique();
+            entity.HasIndex(attempt => new { attempt.OrganizationId, attempt.CreatedAt });
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(attempt => attempt.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(attempt => attempt.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ProjectEnvironment>()
+                .WithMany()
+                .HasForeignKey(attempt => attempt.EnvironmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<WebhookEndpoint>()
+                .WithMany()
+                .HasForeignKey(attempt => attempt.WebhookEndpointId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<WebhookEvent>()
+                .WithMany()
+                .HasForeignKey(attempt => attempt.WebhookEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<WebhookDelivery>()
+                .WithMany()
+                .HasForeignKey(attempt => attempt.WebhookDeliveryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
