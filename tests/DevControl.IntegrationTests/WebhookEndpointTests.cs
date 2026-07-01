@@ -299,6 +299,11 @@ public sealed partial class WebhookEndpointTests
     {
         public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken cancellationToken)
         {
+            if (IPAddress.TryParse(host, out var parsed))
+            {
+                return Task.FromResult<IReadOnlyList<IPAddress>>([parsed]);
+            }
+
             return Task.FromResult<IReadOnlyList<IPAddress>>([address]);
         }
     }

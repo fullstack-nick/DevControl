@@ -299,8 +299,7 @@ public static class WebhookEndpoints
             return Results.NotFound();
         }
 
-        var deliveries = await QueryDeliveryResponses(dbContext, organizationId)
-            .Where(delivery => delivery.EndpointId == endpointId)
+        var deliveries = await QueryDeliveryResponses(dbContext, organizationId, endpointId, deliveryId: null)
             .OrderByDescending(delivery => delivery.CreatedAt)
             .Take(50)
             .ToListAsync(cancellationToken);
@@ -560,14 +559,29 @@ public static class WebhookEndpoints
         Guid deliveryId,
         CancellationToken cancellationToken)
     {
-        return await QueryDeliveryResponses(dbContext, organizationId)
-            .SingleOrDefaultAsync(delivery => delivery.Id == deliveryId, cancellationToken);
+        return await QueryDeliveryResponses(dbContext, organizationId, endpointId: null, deliveryId)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static IQueryable<WebhookDeliveryResponse> QueryDeliveryResponses(DevControlDbContext dbContext, Guid organizationId)
+    private static IQueryable<WebhookDeliveryResponse> QueryDeliveryResponses(
+        DevControlDbContext dbContext,
+        Guid organizationId,
+        Guid? endpointId,
+        Guid? deliveryId)
     {
-        return dbContext.WebhookDeliveries
-            .Where(delivery => delivery.OrganizationId == organizationId)
+        var deliveries = dbContext.WebhookDeliveries
+            .Where(delivery => delivery.OrganizationId == organizationId);
+        if (endpointId is not null)
+        {
+            deliveries = deliveries.Where(delivery => delivery.WebhookEndpointId == endpointId);
+        }
+
+        if (deliveryId is not null)
+        {
+            deliveries = deliveries.Where(delivery => delivery.Id == deliveryId);
+        }
+
+        return deliveries
             .Join(
                 dbContext.WebhookEvents,
                 delivery => delivery.WebhookEventId,
