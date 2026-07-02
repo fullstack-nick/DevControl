@@ -15,7 +15,7 @@ using Prometheus.DotNetRuntime;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables(prefix: "DEVCONTROL_");
-var metricsEnabled = IsMetricsEnabled(builder.Configuration);
+var metricsAccess = MetricsAccessOptions.FromConfiguration(builder.Configuration, builder.Environment);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options =>
@@ -44,7 +44,7 @@ builder.Services.AddScoped<RetentionCleanupService>();
 builder.Services.AddSingleton(RetentionCleanupOptions.FromConfiguration(builder.Configuration));
 
 var app = builder.Build();
-var runtimeMetrics = metricsEnabled
+var runtimeMetrics = metricsAccess.Enabled
     ? DotNetRuntimeStatsBuilder.Default().StartCollecting()
     : null;
 if (runtimeMetrics is not null)
@@ -95,8 +95,20 @@ app.Use(async (context, next) =>
     }
 });
 
-if (metricsEnabled)
+if (metricsAccess.Enabled)
 {
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path == "/metrics" &&
+            !metricsAccess.IsAuthorized(context.Request.Headers.Authorization.ToString()))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        await next();
+    });
+
     app.UseMetricServer();
 }
 
@@ -114,7 +126,7 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapGet("/health/live", () => Results.Ok(HealthPayload.Live()));
-if (!metricsEnabled)
+if (!metricsAccess.Enabled)
 {
     app.MapGet("/metrics", () => Results.NotFound());
 }
@@ -162,11 +174,6 @@ static bool IsStartupMigrationEnabled()
 {
     var rawValue = Environment.GetEnvironmentVariable("DEVCONTROL_RUN_MIGRATIONS_ON_STARTUP");
     return bool.TryParse(rawValue, out var enabled) && enabled;
-}
-
-static bool IsMetricsEnabled(IConfiguration configuration)
-{
-    return bool.TryParse(configuration["METRICS_ENABLED"], out var enabled) && enabled;
 }
 
 static bool ShouldLogAccess(PathString path)

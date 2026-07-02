@@ -40,6 +40,21 @@ output "cloud_run_service_url" {
   value = google_cloud_run_v2_service.devcontrol.uri
 }
 
+output "live_observability_grafana_url" {
+  value       = google_cloud_run_v2_service.devcontrol_observability.uri
+  description = "On-demand live Grafana URL for the DevControl observability Cloud Run service."
+}
+
+output "metrics_scrape_secret_id" {
+  value       = google_secret_manager_secret.metrics_scrape_token.secret_id
+  description = "Secret Manager secret ID containing the live /metrics scrape token."
+}
+
+output "grafana_admin_secret_id" {
+  value       = google_secret_manager_secret.grafana_admin_password.secret_id
+  description = "Secret Manager secret ID containing the live Grafana admin password."
+}
+
 output "github_workload_identity_provider" {
   value = google_iam_workload_identity_pool_provider.github.name
 }

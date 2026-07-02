@@ -19,6 +19,13 @@ resource "google_service_account" "github_deployer" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_service_account" "observability" {
+  account_id   = "${local.app_name}-observability"
+  display_name = "DevControl live observability Cloud Run"
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_secret_manager_secret_iam_member" "runtime_can_read_postgres_password" {
   secret_id = google_secret_manager_secret.postgres_password.id
   role      = "roles/secretmanager.secretAccessor"
@@ -29,6 +36,48 @@ resource "google_secret_manager_secret_iam_member" "runtime_can_read_scheduler_s
   secret_id = google_secret_manager_secret.scheduler_secret.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "runtime_can_read_metrics_scrape_token" {
+  secret_id = google_secret_manager_secret.metrics_scrape_token.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "observability_can_read_metrics_scrape_token" {
+  secret_id = google_secret_manager_secret.metrics_scrape_token.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.observability.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "observability_can_read_grafana_admin_password" {
+  secret_id = google_secret_manager_secret.grafana_admin_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.observability.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "observability_can_read_prometheus_config" {
+  secret_id = google_secret_manager_secret.prometheus_config.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.observability.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "observability_can_read_grafana_datasource_config" {
+  secret_id = google_secret_manager_secret.grafana_datasource_config.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.observability.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "observability_can_read_grafana_dashboard_provider" {
+  secret_id = google_secret_manager_secret.grafana_dashboard_provider.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.observability.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "observability_can_read_grafana_stage_9_dashboard" {
+  secret_id = google_secret_manager_secret.grafana_stage_9_dashboard.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.observability.email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "vm_can_read_postgres_password" {

@@ -106,10 +106,10 @@ Admin-only `workflow_dispatch` control for deploy, redeploy, and rollback. See
 
 ## Stage 9 Observability and Production Hardening
 
-Stage 9 adds local Prometheus/Grafana dashboards, a disabled-by-default
-`/metrics` endpoint, scheduler-driven retention cleanup, PostgreSQL
-backup/restore scripts, a private 7-day backup bucket, and free-tier guard
-checks. See
+Stage 9 adds local and live-on-demand Prometheus/Grafana dashboards, a
+token-protected live `/metrics` endpoint, scheduler-driven retention cleanup,
+PostgreSQL backup/restore scripts, a private 7-day backup bucket, and
+free-tier guard checks. See
 [docs/stage-9-observability-production-hardening.md](docs/stage-9-observability-production-hardening.md).
 
 Run the local observability demo:
@@ -127,10 +127,11 @@ http://localhost:9090
 http://localhost:3000/d/devcontrol-stage-9/devcontrol-stage-9
 ```
 
-Live GCP proof still stays deployed-light:
+Live GCP observability is on-demand, not always-on:
 
 ```powershell
 .\scripts\gcp\smoke-test-cloud-run.ps1 -ServiceUrl <cloud-run-url>
+.\scripts\gcp\smoke-test-live-observability.ps1
 .\scripts\gcp\assert-free-tier-guards.ps1
 .\scripts\gcp\backup-postgres.ps1
 .\scripts\gcp\verify-postgres-restore.ps1
@@ -154,8 +155,9 @@ start http://localhost:3000/d/devcontrol-stage-9/devcontrol-stage-9
 Invoke-RestMethod -Method Post http://localhost:8080/internal/scheduler/tick `
   -Headers @{ "X-DevControl-Scheduler-Secret" = "devcontrol_local_scheduler_secret" }
 
-# 5. Prove GCP stays lean and backups restore.
+# 5. Prove live GCP observability, lean resource limits, and backups.
 $env:DEVCONTROL_GCP_PROJECT_ID = "devcontrol-r7m5o9ld"
+.\scripts\gcp\smoke-test-live-observability.ps1
 .\scripts\gcp\assert-free-tier-guards.ps1
 .\scripts\gcp\backup-postgres.ps1
 .\scripts\gcp\verify-postgres-restore.ps1

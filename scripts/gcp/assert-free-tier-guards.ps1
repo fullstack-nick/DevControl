@@ -4,6 +4,7 @@ param(
   [string]$Region = "us-central1",
   [string]$Zone = "us-central1-a",
   [string]$ServiceName = "devcontrol",
+  [string]$ObservabilityServiceName = "devcontrol-observability",
   [string]$PostgresInstanceName = "devcontrol-postgres",
   [string]$ArtifactRepository = "devcontrol-images",
   [string]$BackupBucketUrl
@@ -52,30 +53,71 @@ function To-JsonObject {
   return ($json | ConvertFrom-Json)
 }
 
+function Get-RunTemplateDetails {
+  param($Service)
+
+  if ($null -ne $Service.template) {
+    $scaling = $Service.template.scaling
+    return [pscustomobject]@{
+      MinInstances = if ($null -eq $scaling.minInstanceCount) { 0 } else { [int]$scaling.minInstanceCount }
+      MaxInstances = [int]$scaling.maxInstanceCount
+      Containers = @($Service.template.containers)
+    }
+  }
+
+  $annotations = $Service.spec.template.metadata.annotations
+  return [pscustomobject]@{
+    MinInstances = if ($null -eq $annotations."autoscaling.knative.dev/minScale") { 0 } else { [int]$annotations."autoscaling.knative.dev/minScale" }
+    MaxInstances = [int]$annotations."autoscaling.knative.dev/maxScale"
+    Containers = @($Service.spec.template.spec.containers)
+  }
+}
+
+function Get-ContainerCpuIdle {
+  param($Container)
+
+  if ($null -ne $Container.resources.cpuIdle) {
+    return [bool]$Container.resources.cpuIdle
+  }
+
+  return $true
+}
+
 $service = To-JsonObject `
   -Command @("run", "services", "describe", $ServiceName, "--project", $ProjectId, "--region", $Region, "--format=json") `
   -Operation "describe Cloud Run service"
-$container = $null
-$minInstances = 0
-$maxInstances = 0
-if ($null -ne $service.template) {
-  $scaling = $service.template.scaling
-  $minInstances = if ($null -eq $scaling.minInstanceCount) { 0 } else { [int]$scaling.minInstanceCount }
-  $maxInstances = [int]$scaling.maxInstanceCount
-  $container = $service.template.containers[0]
-} else {
-  $annotations = $service.spec.template.metadata.annotations
-  $minInstances = if ($null -eq $annotations."autoscaling.knative.dev/minScale") { 0 } else { [int]$annotations."autoscaling.knative.dev/minScale" }
-  $maxInstances = [int]$annotations."autoscaling.knative.dev/maxScale"
-  $container = $service.spec.template.spec.containers[0]
-}
+$serviceTemplate = Get-RunTemplateDetails -Service $service
+$container = $serviceTemplate.Containers[0]
 
 Assert-True ($service.metadata.name -eq $ServiceName) "Cloud Run service name is not $ServiceName."
 Assert-True ($service.metadata.labels.app -eq "devcontrol") "Cloud Run service is missing app=devcontrol label."
-Assert-True ($minInstances -eq 0) "Cloud Run min instances must be 0."
-Assert-True ($maxInstances -eq 1) "Cloud Run max instances must be 1."
+Assert-True ($serviceTemplate.MinInstances -eq 0) "Cloud Run min instances must be 0."
+Assert-True ($serviceTemplate.MaxInstances -eq 1) "Cloud Run max instances must be 1."
 Assert-True ($container.resources.limits.memory -eq "512Mi") "Cloud Run memory limit must be 512Mi."
 Assert-True ($container.resources.limits.cpu -eq "1") "Cloud Run CPU limit must be 1."
+Assert-True (Get-ContainerCpuIdle -Container $container) "Cloud Run must use request-based billing/cpu_idle=true."
+
+$observabilityService = To-JsonObject `
+  -Command @("run", "services", "describe", $ObservabilityServiceName, "--project", $ProjectId, "--region", $Region, "--format=json") `
+  -Operation "describe live observability Cloud Run service"
+$observabilityTemplate = Get-RunTemplateDetails -Service $observabilityService
+$observabilityContainers = @($observabilityTemplate.Containers)
+$grafanaContainer = $observabilityContainers | Where-Object { $_.name -eq "grafana" } | Select-Object -First 1
+$prometheusContainer = $observabilityContainers | Where-Object { $_.name -eq "prometheus" } | Select-Object -First 1
+
+Assert-True ($observabilityService.metadata.name -eq $ObservabilityServiceName) "Observability Cloud Run service name is not $ObservabilityServiceName."
+Assert-True ($observabilityService.metadata.labels.app -eq "devcontrol") "Observability Cloud Run service is missing app=devcontrol label."
+Assert-True ($observabilityTemplate.MinInstances -eq 0) "Observability Cloud Run min instances must be 0."
+Assert-True ($observabilityTemplate.MaxInstances -eq 1) "Observability Cloud Run max instances must be 1."
+Assert-True ($observabilityContainers.Count -eq 2) "Observability Cloud Run must have exactly Grafana and Prometheus containers."
+Assert-True ($null -ne $grafanaContainer) "Grafana container is missing from observability Cloud Run."
+Assert-True ($null -ne $prometheusContainer) "Prometheus container is missing from observability Cloud Run."
+Assert-True ($grafanaContainer.resources.limits.memory -eq "512Mi") "Grafana memory limit must be 512Mi."
+Assert-True ($grafanaContainer.resources.limits.cpu -eq "1") "Grafana CPU limit must be 1."
+Assert-True (Get-ContainerCpuIdle -Container $grafanaContainer) "Grafana must use request-based billing/cpu_idle=true."
+Assert-True ($prometheusContainer.resources.limits.memory -eq "512Mi") "Prometheus memory limit must be 512Mi."
+Assert-True ($prometheusContainer.resources.limits.cpu -eq "1") "Prometheus CPU limit must be 1."
+Assert-True (Get-ContainerCpuIdle -Container $prometheusContainer) "Prometheus must use request-based billing/cpu_idle=true."
 
 $instance = To-JsonObject `
   -Command @("compute", "instances", "describe", $PostgresInstanceName, "--project", $ProjectId, "--zone", $Zone, "--format=json") `
@@ -119,12 +161,15 @@ Assert-True ($deleteRules.Count -ge 1) "Backup bucket must delete objects after 
 
 $runServiceNames = & $gcloud run services list --project $ProjectId --region $Region --format="value(metadata.name)"
 Assert-LastExitCode "list Cloud Run services"
-$deployedObservabilityServices = @($runServiceNames | Where-Object { $_ -match "prometheus|grafana" })
-Assert-True ($deployedObservabilityServices.Count -eq 0) "Prometheus/Grafana must not be deployed to Cloud Run: $($deployedObservabilityServices -join ', ')"
+$deployedObservabilityServices = @($runServiceNames | Where-Object {
+  ($_ -match "prometheus|grafana|observability") -and $_ -ne $ObservabilityServiceName
+})
+Assert-True ($deployedObservabilityServices.Count -eq 0) "Unexpected observability Cloud Run services are deployed: $($deployedObservabilityServices -join ', ')"
+Assert-True (@($runServiceNames | Where-Object { $_ -eq $ObservabilityServiceName }).Count -eq 1) "Approved observability Cloud Run service $ObservabilityServiceName was not found."
 
 $vmNames = & $gcloud compute instances list --project $ProjectId --format="value(name)"
 Assert-LastExitCode "list Compute Engine VMs"
-$deployedObservabilityVms = @($vmNames | Where-Object { $_ -match "prometheus|grafana" })
-Assert-True ($deployedObservabilityVms.Count -eq 0) "Prometheus/Grafana must not be deployed as VMs: $($deployedObservabilityVms -join ', ')"
+$deployedObservabilityVms = @($vmNames | Where-Object { $_ -match "prometheus|grafana|observability" })
+Assert-True ($deployedObservabilityVms.Count -eq 0) "Prometheus/Grafana/observability must not be deployed as VMs: $($deployedObservabilityVms -join ', ')"
 
 Write-Host "Free-tier guard check passed for project $ProjectId."

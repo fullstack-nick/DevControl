@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using DevControl.Domain.Entities;
 using DevControl.Domain.Enums;
 using DevControl.Infrastructure.Database;
@@ -32,6 +33,44 @@ public sealed class Stage9ObservabilityTests
 
         _ = await client.GetAsync("/health/live");
         var response = await client.GetAsync("/metrics");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("text/plain", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("devcontrol_http_requests_total", body);
+    }
+
+    [Fact]
+    public async Task MetricsEndpoint_ReturnsNotFound_WhenScrapeTokenIsMissingOrWrong()
+    {
+        await using var factory = new Stage9Factory(
+            "Host=127.0.0.1;Port=65432;Database=missing;Username=missing;Password=missing",
+            metricsEnabled: true,
+            metricsScrapeToken: "test-metrics-token");
+        using var client = factory.CreateClient();
+
+        var missingTokenResponse = await client.GetAsync("/metrics");
+        using var wrongTokenRequest = new HttpRequestMessage(HttpMethod.Get, "/metrics");
+        wrongTokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-token");
+        var wrongTokenResponse = await client.SendAsync(wrongTokenRequest);
+
+        Assert.Equal(HttpStatusCode.NotFound, missingTokenResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, wrongTokenResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task MetricsEndpoint_ReturnsPrometheusText_WhenScrapeTokenMatches()
+    {
+        await using var factory = new Stage9Factory(
+            "Host=127.0.0.1;Port=65432;Database=missing;Username=missing;Password=missing",
+            metricsEnabled: true,
+            metricsScrapeToken: "test-metrics-token");
+        using var client = factory.CreateClient();
+
+        _ = await client.GetAsync("/health/live");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/metrics");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "test-metrics-token");
+        var response = await client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -85,17 +124,19 @@ public sealed class Stage9ObservabilityTests
         private readonly string? originalConnectionString;
         private readonly string? originalSchedulerSecret;
         private readonly string? originalMetricsEnabled;
+        private readonly string? originalMetricsScrapeToken;
         private readonly string? originalRateLimitDays;
         private readonly string? originalMonitorDays;
         private readonly string? originalWebhookPreviewDays;
         private readonly string? originalWebhookDeliveryDays;
         private readonly string? originalCleanupBatchSize;
 
-        public Stage9Factory(string connectionString, bool metricsEnabled)
+        public Stage9Factory(string connectionString, bool metricsEnabled, string? metricsScrapeToken = null)
         {
             originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DevControl");
             originalSchedulerSecret = Environment.GetEnvironmentVariable("DEVCONTROL_SCHEDULER_SECRET");
             originalMetricsEnabled = Environment.GetEnvironmentVariable("DEVCONTROL_METRICS_ENABLED");
+            originalMetricsScrapeToken = Environment.GetEnvironmentVariable("DEVCONTROL_METRICS_SCRAPE_TOKEN");
             originalRateLimitDays = Environment.GetEnvironmentVariable("DEVCONTROL_RETENTION_RATE_LIMIT_WINDOWS_DAYS");
             originalMonitorDays = Environment.GetEnvironmentVariable("DEVCONTROL_RETENTION_MONITOR_CHECKS_DAYS");
             originalWebhookPreviewDays = Environment.GetEnvironmentVariable("DEVCONTROL_RETENTION_WEBHOOK_PREVIEW_DAYS");
@@ -105,6 +146,7 @@ public sealed class Stage9ObservabilityTests
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", connectionString);
             Environment.SetEnvironmentVariable("DEVCONTROL_SCHEDULER_SECRET", SchedulerSecret);
             Environment.SetEnvironmentVariable("DEVCONTROL_METRICS_ENABLED", metricsEnabled ? "true" : "false");
+            Environment.SetEnvironmentVariable("DEVCONTROL_METRICS_SCRAPE_TOKEN", metricsScrapeToken);
             Environment.SetEnvironmentVariable("DEVCONTROL_RETENTION_RATE_LIMIT_WINDOWS_DAYS", "14");
             Environment.SetEnvironmentVariable("DEVCONTROL_RETENTION_MONITOR_CHECKS_DAYS", "30");
             Environment.SetEnvironmentVariable("DEVCONTROL_RETENTION_WEBHOOK_PREVIEW_DAYS", "30");
@@ -249,6 +291,7 @@ public sealed class Stage9ObservabilityTests
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", originalConnectionString);
             Environment.SetEnvironmentVariable("DEVCONTROL_SCHEDULER_SECRET", originalSchedulerSecret);
             Environment.SetEnvironmentVariable("DEVCONTROL_METRICS_ENABLED", originalMetricsEnabled);
+            Environment.SetEnvironmentVariable("DEVCONTROL_METRICS_SCRAPE_TOKEN", originalMetricsScrapeToken);
             Environment.SetEnvironmentVariable("DEVCONTROL_RETENTION_RATE_LIMIT_WINDOWS_DAYS", originalRateLimitDays);
             Environment.SetEnvironmentVariable("DEVCONTROL_RETENTION_MONITOR_CHECKS_DAYS", originalMonitorDays);
             Environment.SetEnvironmentVariable("DEVCONTROL_RETENTION_WEBHOOK_PREVIEW_DAYS", originalWebhookPreviewDays);

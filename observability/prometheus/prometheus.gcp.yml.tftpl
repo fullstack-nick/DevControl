@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: devcontrol-live
+    scheme: https
+    metrics_path: /metrics
+    bearer_token_file: /etc/prometheus/secrets/metrics-scrape-token
+    static_configs:
+      - targets:
+          - ${devcontrol_metrics_target}
+        labels:
+          environment: gcp

@@ -1,9 +1,12 @@
 # Stage 9 Observability and Production Hardening
 
-Stage 9 finishes the deployed-light/local-rich observability split.
+Stage 9 now uses local-rich plus live-on-demand observability.
 
 Local development gets Prometheus and Grafana through Docker Compose. The GCP
-deployment stays lean: Cloud Run logs, health checks, a scheduler tick, bounded
+deployment also gets an approved `devcontrol-observability` Cloud Run service
+with Grafana as ingress and Prometheus as a private sidecar. It stays lean:
+`min-instances=0`, `max-instances=1`, request-based billing, ephemeral
+Prometheus storage, Cloud Run logs, health checks, a scheduler tick, bounded
 cleanup work, Artifact Registry cleanup policies, and a short-retention private
 PostgreSQL backup bucket.
 
@@ -42,20 +45,51 @@ The dashboard shows:
 - retention cleanup changes
 - .NET runtime memory, GC, and thread metrics
 
-## Deployed metrics boundary
+## Live GCP observability
 
-`GET /metrics` is controlled by:
+Terraform enables live metrics for the main Cloud Run service and protects them
+with:
 
 ```text
 DEVCONTROL_METRICS_ENABLED
+DEVCONTROL_METRICS_SCRAPE_TOKEN
 ```
 
-The default is disabled. Docker Compose enables it for local Prometheus. The
-Cloud Run Terraform does not set it, so the live service returns 404 for
-`/metrics`.
+Local development can run tokenless metrics. Outside Development/Test, the API
+refuses to start if metrics are enabled without `DEVCONTROL_METRICS_SCRAPE_TOKEN`.
+Live `/metrics` returns 404 without the matching bearer token.
 
-This is intentional. Do not deploy Prometheus or Grafana to Cloud Run, Compute
-Engine, or another always-on service for the MVP.
+Terraform creates:
+
+```text
+devcontrol-observability
+```
+
+That service runs:
+
+- Grafana `13.1.0` as the public ingress container
+- Prometheus `3.13.0` as a private sidecar on `localhost:9090`
+- Secret Manager-mounted Prometheus/Grafana config and dashboard files
+- a 6-hour ephemeral Prometheus retention window
+
+Grafana anonymous access is disabled live. The admin password is stored in
+Secret Manager:
+
+```text
+devcontrol-grafana-admin-password
+```
+
+Prometheus scrapes the main app over HTTPS with a token stored in:
+
+```text
+devcontrol-metrics-scrape-token
+```
+
+This is intentionally not continuous observability. Cloud Run can scale the
+observability service to zero, so Prometheus history can reset between demo or
+inspection windows. Do not deploy always-on Prometheus/Grafana, extra
+observability VMs, Redis, Cloud SQL, Managed Prometheus, or worker pools for
+this stage.
 
 ## Structured log cleanup
 
@@ -70,7 +104,8 @@ paths are suppressed:
 ```
 
 Request logs remain secret-safe. They do not record headers, query strings,
-bodies, API keys, registration tokens, or GitHub OIDC tokens.
+bodies, API keys, registration tokens, metrics scrape tokens, or GitHub OIDC
+tokens.
 
 ## Retention cleanup
 
@@ -156,11 +191,13 @@ Run:
 The guard verifies:
 
 - Cloud Run `min-instances=0`, `max-instances=1`, `cpu=1`, `memory=512Mi`
+- approved observability Cloud Run `min-instances=0`, `max-instances=1`,
+  Grafana + Prometheus only, `cpu=1`, `memory=512Mi`, request-based billing
 - PostgreSQL VM is `e2-micro`
 - boot disk is 10 GB and data disk is 20 GB
 - Artifact Registry cleanup policies exist
 - backup bucket is private and has a 7-day lifecycle
-- Prometheus and Grafana are not deployed as Cloud Run services or VMs
+- no extra Prometheus/Grafana/observability Cloud Run services or VMs exist
 
 ## Stage 9 proof checklist
 
@@ -183,6 +220,7 @@ terraform -chdir=infra/gcp validate
 .\scripts\gcp\terraform-plan.ps1
 git push origin main
 .\scripts\gcp\smoke-test-cloud-run.ps1 -ServiceUrl <cloud-run-url>
+.\scripts\gcp\smoke-test-live-observability.ps1
 .\scripts\gcp\assert-free-tier-guards.ps1
 .\scripts\gcp\backup-postgres.ps1
 .\scripts\gcp\verify-postgres-restore.ps1
@@ -190,5 +228,6 @@ git push origin main
 
 Stage 9 is complete only after the code is on `origin/main`, GitHub Actions has
 deployed it to Cloud Run, live `/health/live` and `/health/ready` pass, live
-`/metrics` returns 404, backup/restore proof passes, and the demo screenshots in
-`docs/assets/stage-9/` are committed.
+`/metrics` is blocked without a token and works with the scrape token, live
+Grafana shows a real Prometheus target, backup/restore proof passes, and the
+demo screenshots in `docs/assets/stage-9/` are committed.
