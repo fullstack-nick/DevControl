@@ -16,6 +16,152 @@
       },
       "fieldConfig": {
         "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "up{job=~\"devcontrol|devcontrol-live\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Live Scrape Target",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "scrape_samples_scraped{job=~\"devcontrol|devcontrol-live\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Scraped Samples",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "sum(devcontrol_http_requests_total)",
+          "legendFormat": "requests",
+          "refId": "A"
+        }
+      ],
+      "title": "Total HTTP Requests",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
           "unit": "reqps"
         },
         "overrides": []
@@ -24,7 +170,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 4
       },
       "id": 1,
       "options": {
@@ -61,7 +207,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 4
       },
       "id": 2,
       "options": {
@@ -98,7 +244,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 8
+        "y": 12
       },
       "id": 3,
       "options": {
@@ -135,7 +281,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 8
+        "y": 12
       },
       "id": 4,
       "options": {
@@ -172,7 +318,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 8
+        "y": 12
       },
       "id": 5,
       "options": {
@@ -209,7 +355,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 15
+        "y": 19
       },
       "id": 6,
       "options": {
@@ -246,7 +392,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 15
+        "y": 19
       },
       "id": 7,
       "options": {
@@ -283,7 +429,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 15
+        "y": 19
       },
       "id": 8,
       "options": {
@@ -320,7 +466,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 26
       },
       "id": 9,
       "options": {
@@ -334,7 +480,7 @@
       },
       "targets": [
         {
-          "expr": "max({job=\"devcontrol\", __name__=~\"process_working_set_bytes|dotnet_.*memory.*|dotnet_gc_heap_size_bytes\"}) by (__name__)",
+          "expr": "max({job=~\"devcontrol|devcontrol-live\", __name__=~\"process_working_set_bytes|dotnet_gc_memory_total_available_bytes|dotnet_gc_heap_size_bytes\"}) by (__name__)",
           "legendFormat": "{{__name__}}",
           "refId": "A"
         }
@@ -357,7 +503,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 26
       },
       "id": 10,
       "options": {
@@ -371,13 +517,13 @@
       },
       "targets": [
         {
-          "expr": "max({job=\"devcontrol\", __name__=~\"dotnet_threadpool_.*|process_num_threads\"}) by (__name__)",
+          "expr": "max({job=~\"devcontrol|devcontrol-live\", __name__=~\"dotnet_threadpool_.*|process_num_threads\"}) by (__name__)",
           "legendFormat": "{{__name__}}",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(dotnet_collection_count_total{job=\"devcontrol\"}[5m])) by (generation)",
-          "legendFormat": "gc gen {{generation}} / sec",
+          "expr": "sum(rate(dotnet_gc_collection_count_total{job=~\"devcontrol|devcontrol-live\"}[5m])) by (gc_generation)",
+          "legendFormat": "gc gen {{gc_generation}} / sec",
           "refId": "B"
         }
       ],
@@ -403,6 +549,6 @@
   "timezone": "browser",
   "title": "DevControl Stage 9",
   "uid": "devcontrol-stage-9",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

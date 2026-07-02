@@ -173,6 +173,11 @@ resource "google_cloud_run_v2_service" "devcontrol_observability" {
         value = "/var/lib/grafana/dashboards/devcontrol-stage-9.json"
       }
 
+      env {
+        name  = "DEVCONTROL_GRAFANA_DASHBOARD_REVISION"
+        value = "20260702-live-data-v2"
+      }
+
       volume_mounts {
         name       = "grafana-datasources"
         mount_path = "/etc/grafana/provisioning/datasources"

@@ -103,6 +103,12 @@ inspection windows. Do not deploy always-on Prometheus/Grafana, extra
 observability VMs, Redis, Cloud SQL, Managed Prometheus, or worker pools for
 this stage.
 
+When the live dashboard opens after scale-to-zero, Prometheus may have no
+samples yet. Wait for the first 30-second scrape and generate app traffic. The
+first dashboard row uses instant queries for scrape target health, scraped
+sample count, and total HTTP requests so the live wiring is visible before
+5-minute rate panels fill in.
+
 ## Structured log cleanup
 
 The API keeps JSON console logs for Cloud Run. Routine access logs for these

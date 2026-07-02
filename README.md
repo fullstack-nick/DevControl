@@ -137,6 +137,12 @@ https://devcontrol-nictbzfhga-uc.a.run.app/observability/
 The raw `devcontrol-observability` Cloud Run service is private infrastructure;
 users should not log in to Grafana with a shared admin password.
 
+Because live Prometheus uses ephemeral Cloud Run storage, it can wake with no
+historical samples after scale-to-zero. After opening Grafana, wait for the
+first 30-second scrape and generate app traffic; the top dashboard row shows
+scrape health, scraped samples, and total HTTP requests before the rate panels
+fill in.
+
 ```powershell
 .\scripts\gcp\smoke-test-cloud-run.ps1 -ServiceUrl <cloud-run-url>
 .\scripts\gcp\smoke-test-live-observability.ps1
