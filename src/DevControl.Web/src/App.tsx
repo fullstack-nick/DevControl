@@ -2413,16 +2413,18 @@ export default function App() {
                   <h2>Audit log</h2>
                   <span>{auditLogs.length}</span>
                 </div>
-                <div className="audit-list">
-                  {auditLogs.length === 0 ? <p className="empty">No audit entries</p> : null}
-                  {auditLogs.map((entry) => (
-                    <div className="audit-row" key={entry.id}>
-                      <time>{formatDate(entry.createdAt)}</time>
-                      <strong>{entry.action}</strong>
-                      <span>{entry.outcome}</span>
-                      <p>{entry.message}</p>
-                    </div>
-                  ))}
+                <div className="scroll-section">
+                  <div className="audit-list">
+                    {auditLogs.length === 0 ? <p className="empty">No audit entries</p> : null}
+                    {auditLogs.map((entry) => (
+                      <div className="audit-row" key={entry.id}>
+                        <time>{formatDate(entry.createdAt)}</time>
+                        <strong>{entry.action}</strong>
+                        <span>{entry.outcome}</span>
+                        <p>{entry.message}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -2433,15 +2435,17 @@ export default function App() {
                   <h2>Control actions</h2>
                   <span>{controlActions.length}</span>
                 </div>
-                <ItemList
-                  empty="No control actions"
-                  items={controlActions.map((action) => ({
-                    id: action.id,
-                    title: action.actionType,
-                    meta: action.status,
-                    detail: `${action.targetType} / ${formatDate(action.requestedAt)}`
-                  }))}
-                />
+                <div className="scroll-section">
+                  <ItemList
+                    empty="No control actions"
+                    items={controlActions.map((action) => ({
+                      id: action.id,
+                      title: action.actionType,
+                      meta: action.status,
+                      detail: `${action.targetType} / ${formatDate(action.requestedAt)}`
+                    }))}
+                  />
+                </div>
               </div>
             )}
           </section>
