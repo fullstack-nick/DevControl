@@ -41,8 +41,8 @@ output "cloud_run_service_url" {
 }
 
 output "live_observability_grafana_url" {
-  value       = google_cloud_run_v2_service.devcontrol_observability.uri
-  description = "On-demand live Grafana URL for the DevControl observability Cloud Run service."
+  value       = "${google_cloud_run_v2_service.devcontrol.uri}/observability/"
+  description = "DevControl-authenticated on-demand live Grafana URL."
 }
 
 output "metrics_scrape_secret_id" {

@@ -109,8 +109,63 @@ resource "google_cloud_run_v2_service" "devcontrol_observability" {
       }
 
       env {
+        name  = "GF_AUTH_BASIC_ENABLED"
+        value = "false"
+      }
+
+      env {
+        name  = "GF_AUTH_DISABLE_LOGIN_FORM"
+        value = "true"
+      }
+
+      env {
+        name  = "GF_AUTH_PROXY_ENABLED"
+        value = "true"
+      }
+
+      env {
+        name  = "GF_AUTH_PROXY_HEADER_NAME"
+        value = "X-WEBAUTH-USER"
+      }
+
+      env {
+        name  = "GF_AUTH_PROXY_HEADER_PROPERTY"
+        value = "username"
+      }
+
+      env {
+        name  = "GF_AUTH_PROXY_HEADERS"
+        value = "Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL"
+      }
+
+      env {
+        name  = "GF_AUTH_PROXY_AUTO_SIGN_UP"
+        value = "true"
+      }
+
+      env {
         name  = "GF_USERS_ALLOW_SIGN_UP"
         value = "false"
+      }
+
+      env {
+        name  = "GF_USERS_AUTO_ASSIGN_ORG_ROLE"
+        value = "Viewer"
+      }
+
+      env {
+        name  = "GF_SERVER_ROOT_URL"
+        value = "${google_cloud_run_v2_service.devcontrol.uri}/observability/"
+      }
+
+      env {
+        name  = "GF_SERVER_SERVE_FROM_SUB_PATH"
+        value = "true"
+      }
+
+      env {
+        name  = "GF_SECURITY_COOKIE_SECURE"
+        value = "true"
       }
 
       env {
@@ -206,10 +261,10 @@ resource "google_cloud_run_v2_service" "devcontrol_observability" {
   }
 }
 
-resource "google_cloud_run_v2_service_iam_member" "observability_public_invoker" {
+resource "google_cloud_run_v2_service_iam_member" "observability_runtime_invoker" {
   project  = var.project_id
   location = google_cloud_run_v2_service.devcontrol_observability.location
   name     = google_cloud_run_v2_service.devcontrol_observability.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  member   = "serviceAccount:${google_service_account.runtime.email}"
 }

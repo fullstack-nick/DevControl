@@ -83,6 +83,16 @@ function Get-ContainerCpuIdle {
   return $true
 }
 
+function Get-RunServiceAccount {
+  param($Service)
+
+  if ($null -ne $Service.template.serviceAccount) {
+    return $Service.template.serviceAccount
+  }
+
+  return $Service.spec.template.spec.serviceAccountName
+}
+
 $service = To-JsonObject `
   -Command @("run", "services", "describe", $ServiceName, "--project", $ProjectId, "--region", $Region, "--format=json") `
   -Operation "describe Cloud Run service"
@@ -118,6 +128,20 @@ Assert-True (Get-ContainerCpuIdle -Container $grafanaContainer) "Grafana must us
 Assert-True ($prometheusContainer.resources.limits.memory -eq "512Mi") "Prometheus memory limit must be 512Mi."
 Assert-True ($prometheusContainer.resources.limits.cpu -eq "1") "Prometheus CPU limit must be 1."
 Assert-True (Get-ContainerCpuIdle -Container $prometheusContainer) "Prometheus must use request-based billing/cpu_idle=true."
+
+$runtimeServiceAccount = Get-RunServiceAccount -Service $service
+$observabilityIamPolicy = To-JsonObject `
+  -Command @("run", "services", "get-iam-policy", $ObservabilityServiceName, "--project", $ProjectId, "--region", $Region, "--format=json") `
+  -Operation "get observability Cloud Run IAM policy"
+$observabilityInvokerMembers = @(
+  $observabilityIamPolicy.bindings |
+    Where-Object { $_.role -eq "roles/run.invoker" } |
+    ForEach-Object { $_.members } |
+    ForEach-Object { $_ }
+)
+Assert-True ($observabilityInvokerMembers -notcontains "allUsers") "Observability Cloud Run must not allow public allUsers invoker."
+Assert-True ($observabilityInvokerMembers -notcontains "allAuthenticatedUsers") "Observability Cloud Run must not allow allAuthenticatedUsers invoker."
+Assert-True ($observabilityInvokerMembers -contains "serviceAccount:$runtimeServiceAccount") "Observability Cloud Run must allow the DevControl runtime service account to invoke it."
 
 $instance = To-JsonObject `
   -Command @("compute", "instances", "describe", $PostgresInstanceName, "--project", $ProjectId, "--zone", $Zone, "--format=json") `

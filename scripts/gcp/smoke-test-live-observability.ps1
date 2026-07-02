@@ -5,7 +5,6 @@ param(
   [string]$ServiceName = "devcontrol",
   [string]$ObservabilityServiceName = "devcontrol-observability",
   [string]$MetricsSecretId = "devcontrol-metrics-scrape-token",
-  [string]$GrafanaAdminSecretId = "devcontrol-grafana-admin-password",
   [int]$Retries = 12,
   [int]$DelaySeconds = 10
 )
@@ -77,15 +76,14 @@ if ([string]::IsNullOrWhiteSpace($serviceUrl)) {
   throw "Could not resolve Cloud Run URL for $ServiceName."
 }
 
-$grafanaUrl = & $gcloud run services describe $ObservabilityServiceName --project $ProjectId --region $Region --format="value(status.url)"
+$observabilityUpstreamUrl = & $gcloud run services describe $ObservabilityServiceName --project $ProjectId --region $Region --format="value(status.url)"
 Assert-LastExitCode "describe Cloud Run service $ObservabilityServiceName"
-$grafanaUrl = ($grafanaUrl -join "").Trim()
-if ([string]::IsNullOrWhiteSpace($grafanaUrl)) {
+$observabilityUpstreamUrl = ($observabilityUpstreamUrl -join "").Trim()
+if ([string]::IsNullOrWhiteSpace($observabilityUpstreamUrl)) {
   throw "Could not resolve Cloud Run URL for $ObservabilityServiceName."
 }
 
 $metricsToken = Get-SecretValue -SecretId $MetricsSecretId
-$grafanaPassword = Get-SecretValue -SecretId $GrafanaAdminSecretId
 
 $missingTokenStatus = Invoke-CurlText -Arguments @(
   "--silent",
@@ -116,31 +114,28 @@ if ($metricsStatus -ne "200" -or $metricsBody -notmatch "devcontrol_http_request
   throw "Live /metrics did not return expected Prometheus text."
 }
 
-$basicAuthBytes = [System.Text.Encoding]::ASCII.GetBytes("admin:$grafanaPassword")
-$basicAuth = [Convert]::ToBase64String($basicAuthBytes)
-$grafanaHeaders = @{ Authorization = "Basic $basicAuth" }
-
-$grafanaHealth = Invoke-WithRetries -Description "Grafana health" -Operation {
-  Invoke-RestMethod -Uri "$grafanaUrl/api/health" -Headers $grafanaHeaders
+$publicConfig = Invoke-WithRetries -Description "DevControl public config" -Operation {
+  Invoke-RestMethod -Uri "$serviceUrl/api/public/config"
 }
-if ($grafanaHealth.database -ne "ok") {
-  throw "Grafana health did not report an ok database."
+if ($publicConfig.observabilityUrl -ne "/observability/") {
+  throw "DevControl public config did not return the proxied observability path."
 }
 
-$targets = Invoke-WithRetries -Description "Prometheus target query through Grafana" -Operation {
-  Invoke-RestMethod -Uri "$grafanaUrl/api/datasources/proxy/uid/Prometheus/api/v1/targets" -Headers $grafanaHeaders
-}
-$activeTargets = @($targets.data.activeTargets)
-$upTargets = @($activeTargets | Where-Object { $_.health -eq "up" -and $_.labels.job -eq "devcontrol-live" })
-if ($upTargets.Count -lt 1) {
-  throw "Prometheus did not report an up devcontrol-live target."
+$directGrafanaStatus = Invoke-CurlText -Arguments @(
+  "--silent",
+  "--output", "NUL",
+  "--write-out", "%{http_code}",
+  "$observabilityUpstreamUrl/api/health"
+)
+if ($directGrafanaStatus -eq "200") {
+  throw "Direct observability Cloud Run returned 200 without Cloud Run IAM."
 }
 
 [pscustomobject]@{
   serviceUrl = $serviceUrl
-  grafanaUrl = $grafanaUrl
+  observabilityUrl = "$serviceUrl/observability/"
+  observabilityUpstreamUrl = $observabilityUpstreamUrl
   metricsWithoutTokenStatus = $missingTokenStatus
   metricsWithTokenStatus = [int]$metricsStatus
-  prometheusTargetHealth = $upTargets[0].health
-  prometheusLastScrape = $upTargets[0].lastScrape
+  directGrafanaWithoutIamStatus = $directGrafanaStatus
 } | ConvertTo-Json -Depth 5

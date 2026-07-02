@@ -4,11 +4,13 @@ Stage 9 now uses local-rich plus live-on-demand observability.
 
 Local development gets Prometheus and Grafana through Docker Compose. The GCP
 deployment also gets an approved `devcontrol-observability` Cloud Run service
-with Grafana as ingress and Prometheus as a private sidecar. It stays lean:
-`min-instances=0`, `max-instances=1`, request-based billing, ephemeral
-Prometheus storage, Cloud Run logs, health checks, a scheduler tick, bounded
-cleanup work, Artifact Registry cleanup policies, and a short-retention private
-PostgreSQL backup bucket.
+with Grafana and a private Prometheus sidecar. DevControl is the user-facing
+entry point: signed-in users open Grafana through `/observability/`, and
+DevControl injects Grafana auth-proxy headers after checking organization
+membership. It stays lean: `min-instances=0`, `max-instances=1`, request-based
+billing, ephemeral Prometheus storage, Cloud Run logs, health checks, a
+scheduler tick, bounded cleanup work, Artifact Registry cleanup policies, and a
+short-retention private PostgreSQL backup bucket.
 
 ## Local observability
 
@@ -67,13 +69,23 @@ devcontrol-observability
 
 That service runs:
 
-- Grafana `13.1.0` as the public ingress container
+- Grafana `13.1.0` as the ingress container
 - Prometheus `3.13.0` as a private sidecar on `localhost:9090`
 - Secret Manager-mounted Prometheus/Grafana config and dashboard files
 - a 6-hour ephemeral Prometheus retention window
 
-Grafana anonymous access is disabled live. The admin password is stored in
-Secret Manager:
+The normal browser path is:
+
+```text
+https://devcontrol-nictbzfhga-uc.a.run.app/observability/
+```
+
+Direct access to the raw `devcontrol-observability` Cloud Run URL is blocked by
+Cloud Run IAM. Only the main DevControl runtime service account can invoke it.
+Grafana anonymous access, basic auth, and the login form are disabled live.
+Grafana trusts DevControl's auth-proxy headers and auto-provisions proxied users
+as viewers. The generated Grafana admin password still exists in Secret Manager
+for break-glass maintenance:
 
 ```text
 devcontrol-grafana-admin-password
@@ -193,6 +205,9 @@ The guard verifies:
 - Cloud Run `min-instances=0`, `max-instances=1`, `cpu=1`, `memory=512Mi`
 - approved observability Cloud Run `min-instances=0`, `max-instances=1`,
   Grafana + Prometheus only, `cpu=1`, `memory=512Mi`, request-based billing
+- raw observability Cloud Run has no public `allUsers` or
+  `allAuthenticatedUsers` invoker binding
+- DevControl runtime service account can invoke raw observability Cloud Run
 - PostgreSQL VM is `e2-micro`
 - boot disk is 10 GB and data disk is 20 GB
 - Artifact Registry cleanup policies exist
@@ -228,9 +243,10 @@ git push origin main
 
 Stage 9 is complete only after the code is on `origin/main`, GitHub Actions has
 deployed it to Cloud Run, live `/health/live` and `/health/ready` pass, live
-`/metrics` is blocked without a token and works with the scrape token, live
-Grafana shows a real Prometheus target, backup/restore proof passes, and the
-demo screenshots in `docs/assets/stage-9/` are committed.
+`/metrics` is blocked without a token and works with the scrape token,
+DevControl exposes the proxied `/observability/` path, raw Grafana is not
+publicly reachable, backup/restore proof passes, and the demo screenshots in
+`docs/assets/stage-9/` are committed.
 
 Live observability screenshots:
 

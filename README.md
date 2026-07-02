@@ -107,9 +107,9 @@ Admin-only `workflow_dispatch` control for deploy, redeploy, and rollback. See
 ## Stage 9 Observability and Production Hardening
 
 Stage 9 adds local and live-on-demand Prometheus/Grafana dashboards, a
-token-protected live `/metrics` endpoint, scheduler-driven retention cleanup,
-PostgreSQL backup/restore scripts, a private 7-day backup bucket, and
-free-tier guard checks. See
+token-protected live `/metrics` endpoint, a DevControl-authenticated live
+Grafana proxy, scheduler-driven retention cleanup, PostgreSQL backup/restore
+scripts, a private 7-day backup bucket, and free-tier guard checks. See
 [docs/stage-9-observability-production-hardening.md](docs/stage-9-observability-production-hardening.md).
 
 Run the local observability demo:
@@ -127,7 +127,15 @@ http://localhost:9090
 http://localhost:3000/d/devcontrol-stage-9/devcontrol-stage-9
 ```
 
-Live GCP observability is on-demand, not always-on:
+Live GCP observability is on-demand, not always-on. Signed-in DevControl users
+with organization access open Grafana from the app header or directly at:
+
+```text
+https://devcontrol-nictbzfhga-uc.a.run.app/observability/
+```
+
+The raw `devcontrol-observability` Cloud Run service is private infrastructure;
+users should not log in to Grafana with a shared admin password.
 
 ```powershell
 .\scripts\gcp\smoke-test-cloud-run.ps1 -ServiceUrl <cloud-run-url>

@@ -42,6 +42,16 @@ builder.Services.AddScoped<GitHubSyncService>();
 builder.Services.AddScoped<SchedulerTickService>();
 builder.Services.AddScoped<RetentionCleanupService>();
 builder.Services.AddSingleton(RetentionCleanupOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton(ObservabilityProxyOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddHttpClient<CloudRunIdentityTokenProvider>(client =>
+{
+    client.BaseAddress = new Uri("http://metadata.google.internal/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddHttpClient<ObservabilityProxyService>(client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 
 var app = builder.Build();
 var runtimeMetrics = metricsAccess.Enabled
@@ -166,6 +176,7 @@ app.MapMonitoringEndpoints();
 app.MapGitHubEndpoints();
 app.MapOperatorEndpoints();
 app.MapPublicConfigEndpoints();
+app.MapObservabilityProxyEndpoints();
 
 app.MapFallbackToFile("index.html");
 

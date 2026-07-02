@@ -16,7 +16,7 @@ public sealed class PublicConfigEndpointTests
 
         var config = await client.GetFromJsonAsync<PublicConfigDto>("/api/public/config");
 
-        Assert.Equal("https://grafana.example.test", config?.ObservabilityUrl);
+        Assert.Equal("/observability/", config?.ObservabilityUrl);
     }
 
     [Fact]
@@ -30,20 +30,20 @@ public sealed class PublicConfigEndpointTests
         var response = await client.SendAsync(request);
         var config = await response.Content.ReadFromJsonAsync<PublicConfigDto>();
 
-        Assert.Equal("https://devcontrol-observability-nictbzfhga-uc.a.run.app", config?.ObservabilityUrl);
+        Assert.Equal("/observability/", config?.ObservabilityUrl);
     }
 
     private sealed class DevControlPublicConfigFactory : WebApplicationFactory<Program>
     {
         private readonly string? originalConnectionString;
-        private readonly string? originalObservabilityUrl;
+        private readonly string? originalObservabilityUpstreamUrl;
 
         public DevControlPublicConfigFactory(string? observabilityUrl)
         {
             originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DevControl");
-            originalObservabilityUrl = Environment.GetEnvironmentVariable("DEVCONTROL_OBSERVABILITY_URL");
+            originalObservabilityUpstreamUrl = Environment.GetEnvironmentVariable("DEVCONTROL_OBSERVABILITY_UPSTREAM_URL");
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", "Host=127.0.0.1;Port=65432;Database=missing;Username=missing;Password=missing");
-            Environment.SetEnvironmentVariable("DEVCONTROL_OBSERVABILITY_URL", observabilityUrl);
+            Environment.SetEnvironmentVariable("DEVCONTROL_OBSERVABILITY_UPSTREAM_URL", observabilityUrl);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -54,7 +54,7 @@ public sealed class PublicConfigEndpointTests
         protected override void Dispose(bool disposing)
         {
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", originalConnectionString);
-            Environment.SetEnvironmentVariable("DEVCONTROL_OBSERVABILITY_URL", originalObservabilityUrl);
+            Environment.SetEnvironmentVariable("DEVCONTROL_OBSERVABILITY_UPSTREAM_URL", originalObservabilityUpstreamUrl);
             base.Dispose(disposing);
         }
     }
