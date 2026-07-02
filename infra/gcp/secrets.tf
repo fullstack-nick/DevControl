@@ -170,6 +170,10 @@ resource "google_secret_manager_secret" "google_oauth_client_secret" {
   }
 
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "google_oauth_client_secret" {
@@ -193,6 +197,10 @@ resource "google_secret_manager_secret" "smtp_password" {
   }
 
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "smtp_password" {
@@ -216,6 +224,10 @@ resource "google_secret_manager_secret" "operator_bootstrap_secret" {
   }
 
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "operator_bootstrap_secret" {
@@ -239,6 +251,10 @@ resource "google_secret_manager_secret" "github_app_private_key" {
   }
 
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "github_app_private_key" {
