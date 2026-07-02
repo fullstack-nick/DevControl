@@ -2,16 +2,20 @@ using System.Diagnostics;
 using DevControl.Api.Endpoints;
 using DevControl.Api.GitHub;
 using DevControl.Api.Monitoring;
+using DevControl.Api.Observability;
 using DevControl.Api.Security;
 using DevControl.Api.Webhooks;
 using DevControl.Application.Health;
 using DevControl.Infrastructure.Database;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Prometheus;
+using Prometheus.DotNetRuntime;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables(prefix: "DEVCONTROL_");
+var metricsEnabled = IsMetricsEnabled(builder.Configuration);
 
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options =>
@@ -36,8 +40,17 @@ builder.Services.AddHttpClient<IGitHubAppClient, GitHubAppClient>();
 builder.Services.AddHttpClient<IGitHubOidcTokenValidator, GitHubOidcTokenValidator>();
 builder.Services.AddScoped<GitHubSyncService>();
 builder.Services.AddScoped<SchedulerTickService>();
+builder.Services.AddScoped<RetentionCleanupService>();
+builder.Services.AddSingleton(RetentionCleanupOptions.FromConfiguration(builder.Configuration));
 
 var app = builder.Build();
+var runtimeMetrics = metricsEnabled
+    ? DotNetRuntimeStatsBuilder.Default().StartCollecting()
+    : null;
+if (runtimeMetrics is not null)
+{
+    app.Lifetime.ApplicationStopping.Register(runtimeMetrics.Dispose);
+}
 
 app.UseForwardedHeaders();
 
@@ -48,13 +61,14 @@ app.Use(async (context, next) =>
         .CreateLogger("DevControl.Http");
 
     var startedAt = Stopwatch.GetTimestamp();
+    var shouldLog = ShouldLogAccess(context.Request.Path);
 
-    using var scope = logger.BeginScope(new Dictionary<string, object?>
+    using var scope = shouldLog ? logger.BeginScope(new Dictionary<string, object?>
     {
         ["TraceId"] = context.TraceIdentifier,
         ["Method"] = context.Request.Method,
         ["Path"] = context.Request.Path.Value
-    });
+    }) : null;
 
     try
     {
@@ -63,14 +77,28 @@ app.Use(async (context, next) =>
     finally
     {
         var elapsed = Stopwatch.GetElapsedTime(startedAt);
-        logger.LogInformation(
-            "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMilliseconds} ms",
+        DevControlMetrics.RecordHttpRequest(
             context.Request.Method,
             context.Request.Path.Value,
             context.Response.StatusCode,
-            elapsed.TotalMilliseconds);
+            elapsed);
+
+        if (shouldLog)
+        {
+            logger.LogInformation(
+                "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMilliseconds} ms",
+                context.Request.Method,
+                context.Request.Path.Value,
+                context.Response.StatusCode,
+                elapsed.TotalMilliseconds);
+        }
     }
 });
+
+if (metricsEnabled)
+{
+    app.UseMetricServer();
+}
 
 if (IsStartupMigrationEnabled())
 {
@@ -86,6 +114,10 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapGet("/health/live", () => Results.Ok(HealthPayload.Live()));
+if (!metricsEnabled)
+{
+    app.MapGet("/metrics", () => Results.NotFound());
+}
 
 app.MapGet("/health/ready", async (
     DevControlDbContext dbContext,
@@ -130,6 +162,29 @@ static bool IsStartupMigrationEnabled()
 {
     var rawValue = Environment.GetEnvironmentVariable("DEVCONTROL_RUN_MIGRATIONS_ON_STARTUP");
     return bool.TryParse(rawValue, out var enabled) && enabled;
+}
+
+static bool IsMetricsEnabled(IConfiguration configuration)
+{
+    return bool.TryParse(configuration["METRICS_ENABLED"], out var enabled) && enabled;
+}
+
+static bool ShouldLogAccess(PathString path)
+{
+    var value = path.Value ?? string.Empty;
+    if (value is "/health/live" or "/health/ready" or "/metrics")
+    {
+        return false;
+    }
+
+    return !value.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".js", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".css", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".ico", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".png", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) &&
+        !value.EndsWith(".webp", StringComparison.OrdinalIgnoreCase);
 }
 
 public partial class Program

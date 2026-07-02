@@ -19,12 +19,12 @@ public sealed class GitHubSyncService(
     {
         if (!gitHubAppClient.IsConfigured)
         {
-            return new GitHubSyncResult(0, 0);
+            return new GitHubSyncResult(0, 0, pullRequestBatchSize, dispatchBatchSize);
         }
 
         var pullRequests = await SyncPullRequestsAsync(pullRequestBatchSize, cancellationToken);
         var dispatches = await SyncWorkflowDispatchesAsync(dispatchBatchSize, cancellationToken);
-        return new GitHubSyncResult(pullRequests, dispatches);
+        return new GitHubSyncResult(pullRequests, dispatches, pullRequestBatchSize, dispatchBatchSize);
     }
 
     private async Task<int> SyncPullRequestsAsync(int batchSize, CancellationToken cancellationToken)
@@ -177,4 +177,8 @@ public sealed class GitHubSyncService(
     }
 }
 
-public sealed record GitHubSyncResult(int PullRequests, int WorkflowDispatches);
+public sealed record GitHubSyncResult(
+    int PullRequests,
+    int WorkflowDispatches,
+    int PullRequestBatchSize = 0,
+    int WorkflowDispatchBatchSize = 0);

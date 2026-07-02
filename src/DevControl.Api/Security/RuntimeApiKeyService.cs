@@ -1,3 +1,4 @@
+using DevControl.Api.Observability;
 using DevControl.Application.Security;
 using DevControl.Domain.Entities;
 using DevControl.Infrastructure.Database;
@@ -37,6 +38,7 @@ public sealed class RuntimeApiKeyService(
         var rawKey = GetRawApiKey(httpContext);
         if (rawKey is null)
         {
+            DevControlMetrics.RecordRuntimeApiKeyRequest(endpoint, "missing_or_invalid");
             return RuntimeApiKeyAuthResult.Denied(RuntimeApiKeyAuthStatus.MissingOrInvalid);
         }
 
@@ -46,6 +48,7 @@ public sealed class RuntimeApiKeyService(
 
         if (apiKey is null)
         {
+            DevControlMetrics.RecordRuntimeApiKeyRequest(endpoint, "missing_or_invalid");
             return RuntimeApiKeyAuthResult.Denied(RuntimeApiKeyAuthStatus.MissingOrInvalid);
         }
 
@@ -53,6 +56,7 @@ public sealed class RuntimeApiKeyService(
         if (apiKey.IsRevoked)
         {
             await RecordUsageAsync(apiKey, endpoint, failed: true, latencyMilliseconds: null, rateLimitHit: false, now, cancellationToken);
+            DevControlMetrics.RecordRuntimeApiKeyRequest(endpoint, "revoked");
             return RuntimeApiKeyAuthResult.Denied(RuntimeApiKeyAuthStatus.Revoked, apiKey);
         }
 
@@ -60,6 +64,7 @@ public sealed class RuntimeApiKeyService(
         if (!scopes.Contains(requiredScope, StringComparer.Ordinal))
         {
             await RecordUsageAsync(apiKey, endpoint, failed: true, latencyMilliseconds: null, rateLimitHit: false, now, cancellationToken);
+            DevControlMetrics.RecordRuntimeApiKeyRequest(endpoint, "scope_denied");
             return RuntimeApiKeyAuthResult.Denied(RuntimeApiKeyAuthStatus.ScopeDenied, apiKey);
         }
 
@@ -82,6 +87,8 @@ public sealed class RuntimeApiKeyService(
         {
             window.MarkRateLimitHit(now);
             await RecordUsageAsync(apiKey, endpoint, failed: true, latencyMilliseconds: null, rateLimitHit: true, now, cancellationToken);
+            DevControlMetrics.RecordRuntimeApiKeyRequest(endpoint, "rate_limited");
+            DevControlMetrics.RecordRuntimeApiKeyRateLimitHit(endpoint);
             return RuntimeApiKeyAuthResult.Denied(RuntimeApiKeyAuthStatus.RateLimited, apiKey);
         }
 
@@ -99,6 +106,7 @@ public sealed class RuntimeApiKeyService(
         var now = timeProvider.GetUtcNow();
         var latencyMilliseconds = Math.Clamp((int)Math.Round(elapsed.TotalMilliseconds), 0, int.MaxValue);
         await RecordUsageAsync(apiKey, endpoint, statusCode >= 400, latencyMilliseconds, rateLimitHit: false, now, cancellationToken);
+        DevControlMetrics.RecordRuntimeApiKeyRequest(endpoint, $"status_{statusCode}");
     }
 
     private async Task RecordUsageAsync(

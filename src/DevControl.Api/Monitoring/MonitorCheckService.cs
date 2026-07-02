@@ -1,4 +1,5 @@
 using DevControl.Application.Outbound;
+using DevControl.Api.Observability;
 using DevControl.Domain.Entities;
 using DevControl.Domain.Enums;
 using DevControl.Infrastructure.Database;
@@ -138,6 +139,7 @@ public sealed class MonitorCheckService(
             responseTruncated,
             now);
         dbContext.MonitorChecks.Add(check);
+        DevControlMetrics.RecordMonitorCheck(status.ToString(), resultKind, TimeSpan.FromMilliseconds(durationMilliseconds));
         await incidentAutomationService.HandleMonitorResultAsync(monitor, check, previousStatus, now, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return check;

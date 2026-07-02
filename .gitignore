@@ -2,6 +2,7 @@ bin/
 obj/
 TestResults/
 coverage/
+.artifacts/
 
 node_modules/
 dist/

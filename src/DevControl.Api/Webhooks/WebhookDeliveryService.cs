@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using DevControl.Api.Observability;
 using DevControl.Application.Outbound;
 using DevControl.Application.Webhooks;
 using DevControl.Domain.Entities;
@@ -83,6 +84,11 @@ public sealed class WebhookDeliveryService(
             response.ResponseTruncated,
             nextAttemptAt,
             now);
+        DevControlMetrics.RecordWebhookDeliveryAttempt(
+            delivery.Status.ToString(),
+            response.Kind.ToString(),
+            response.IsSuccess,
+            response.Duration);
         endpoint.RecordDeliveryResult(response.IsSuccess, now);
         dbContext.WebhookDeliveryAttempts.Add(new WebhookDeliveryAttempt(
             delivery.OrganizationId,

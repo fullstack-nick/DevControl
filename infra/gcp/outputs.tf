@@ -31,6 +31,11 @@ output "artifact_registry_repository" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker.repository_id}"
 }
 
+output "postgres_backup_bucket_url" {
+  value       = "gs://${google_storage_bucket.postgres_backups.name}"
+  description = "Private short-retention PostgreSQL backup bucket."
+}
+
 output "cloud_run_service_url" {
   value = google_cloud_run_v2_service.devcontrol.uri
 }

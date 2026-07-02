@@ -61,6 +61,10 @@ resource "google_secret_manager_secret_version" "google_oauth_client_secret" {
   count       = var.auth_google_client_secret == "" ? 0 : 1
   secret      = google_secret_manager_secret.google_oauth_client_secret[0].id
   secret_data = var.auth_google_client_secret
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
 
 resource "google_secret_manager_secret" "smtp_password" {
@@ -80,6 +84,10 @@ resource "google_secret_manager_secret_version" "smtp_password" {
   count       = var.smtp_password == "" ? 0 : 1
   secret      = google_secret_manager_secret.smtp_password[0].id
   secret_data = var.smtp_password
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
 
 resource "google_secret_manager_secret" "operator_bootstrap_secret" {
@@ -99,6 +107,10 @@ resource "google_secret_manager_secret_version" "operator_bootstrap_secret" {
   count       = var.operator_bootstrap_secret == "" ? 0 : 1
   secret      = google_secret_manager_secret.operator_bootstrap_secret[0].id
   secret_data = var.operator_bootstrap_secret
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
 
 resource "google_secret_manager_secret" "github_app_private_key" {
@@ -118,4 +130,8 @@ resource "google_secret_manager_secret_version" "github_app_private_key" {
   count       = var.github_app_private_key == "" ? 0 : 1
   secret      = google_secret_manager_secret.github_app_private_key[0].id
   secret_data = var.github_app_private_key
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
