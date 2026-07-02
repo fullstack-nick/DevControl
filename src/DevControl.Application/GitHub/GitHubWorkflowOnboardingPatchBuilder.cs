@@ -309,7 +309,6 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         builder.AppendLine("        id: devcontrol_oidc");
         builder.AppendLine("        with:");
         builder.AppendLine("          script: |");
-        builder.AppendLine("            const core = require('@actions/core')");
         builder.AppendLine($"            const token = await core.getIDToken('{audience}')");
         builder.AppendLine("            core.setSecret(token)");
         builder.AppendLine("            core.setOutput('token', token)");

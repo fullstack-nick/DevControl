@@ -48,6 +48,7 @@ public sealed class GitHubStage8Tests
         Assert.Contains("# DEVCONTROL-REGISTRATION-START", result.Content, StringComparison.Ordinal);
         Assert.Contains("devcontrol apps register", result.Content, StringComparison.Ordinal);
         Assert.Contains("--github-oidc-token \"$DEVCONTROL_GITHUB_OIDC_TOKEN\"", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("const core = require('@actions/core')", result.Content, StringComparison.Ordinal);
     }
 
     [Fact]
