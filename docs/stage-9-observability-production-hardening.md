@@ -231,3 +231,8 @@ deployed it to Cloud Run, live `/health/live` and `/health/ready` pass, live
 `/metrics` is blocked without a token and works with the scrape token, live
 Grafana shows a real Prometheus target, backup/restore proof passes, and the
 demo screenshots in `docs/assets/stage-9/` are committed.
+
+Live observability screenshots:
+
+- `docs/assets/stage-9/live-grafana-overview.png`
+- `docs/assets/stage-9/live-prometheus-target-proof.png`

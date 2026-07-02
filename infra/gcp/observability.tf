@@ -174,6 +174,18 @@ resource "google_cloud_run_v2_service" "devcontrol_observability" {
         cpu_idle          = true
         startup_cpu_boost = true
       }
+
+      startup_probe {
+        initial_delay_seconds = 0
+        period_seconds        = 5
+        timeout_seconds       = 2
+        failure_threshold     = 12
+
+        http_get {
+          path = "/-/ready"
+          port = 9090
+        }
+      }
     }
   }
 
@@ -186,6 +198,12 @@ resource "google_cloud_run_v2_service" "devcontrol_observability" {
     google_secret_manager_secret_iam_member.observability_can_read_grafana_dashboard_provider,
     google_secret_manager_secret_iam_member.observability_can_read_grafana_stage_9_dashboard
   ]
+
+  lifecycle {
+    ignore_changes = [
+      scaling
+    ]
+  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "observability_public_invoker" {

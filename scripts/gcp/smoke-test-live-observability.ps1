@@ -59,6 +59,17 @@ function Invoke-WithRetries {
   throw $lastError
 }
 
+function Invoke-CurlText {
+  param([string[]]$Arguments)
+
+  $output = & curl.exe @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "curl failed with exit code $LASTEXITCODE."
+  }
+
+  return ($output -join "`n")
+}
+
 $serviceUrl = & $gcloud run services describe $ServiceName --project $ProjectId --region $Region --format="value(status.url)"
 Assert-LastExitCode "describe Cloud Run service $ServiceName"
 $serviceUrl = ($serviceUrl -join "").Trim()
@@ -76,24 +87,32 @@ if ([string]::IsNullOrWhiteSpace($grafanaUrl)) {
 $metricsToken = Get-SecretValue -SecretId $MetricsSecretId
 $grafanaPassword = Get-SecretValue -SecretId $GrafanaAdminSecretId
 
-$missingTokenStatus = $null
-try {
-  $missingTokenResponse = Invoke-WebRequest -Uri "$serviceUrl/metrics" -Method Get -MaximumRedirection 0
-  $missingTokenStatus = [int]$missingTokenResponse.StatusCode
-} catch {
-  $missingTokenStatus = [int]$_.Exception.Response.StatusCode
-}
+$missingTokenStatus = Invoke-CurlText -Arguments @(
+  "--silent",
+  "--output", "NUL",
+  "--write-out", "%{http_code}",
+  "$serviceUrl/metrics"
+)
 if ($missingTokenStatus -eq 200) {
   throw "Live /metrics returned 200 without a bearer token."
 }
 
-$metricsResponse = Invoke-WithRetries -Description "tokened /metrics" -Operation {
-  Invoke-WebRequest `
-    -Uri "$serviceUrl/metrics" `
-    -Method Get `
-    -Headers @{ Authorization = "Bearer $metricsToken" }
+$metricsBody = Invoke-WithRetries -Description "tokened /metrics" -Operation {
+  Invoke-CurlText -Arguments @(
+    "--fail",
+    "--silent",
+    "--header", "Authorization: Bearer $metricsToken",
+    "$serviceUrl/metrics"
+  )
 }
-if ($metricsResponse.StatusCode -ne 200 -or $metricsResponse.Content -notmatch "devcontrol_http_requests_total") {
+$metricsStatus = Invoke-CurlText -Arguments @(
+  "--silent",
+  "--output", "NUL",
+  "--write-out", "%{http_code}",
+  "--header", "Authorization: Bearer $metricsToken",
+  "$serviceUrl/metrics"
+)
+if ($metricsStatus -ne "200" -or $metricsBody -notmatch "devcontrol_http_requests_total") {
   throw "Live /metrics did not return expected Prometheus text."
 }
 
@@ -121,7 +140,7 @@ if ($upTargets.Count -lt 1) {
   serviceUrl = $serviceUrl
   grafanaUrl = $grafanaUrl
   metricsWithoutTokenStatus = $missingTokenStatus
-  metricsWithTokenStatus = [int]$metricsResponse.StatusCode
+  metricsWithTokenStatus = [int]$metricsStatus
   prometheusTargetHealth = $upTargets[0].health
   prometheusLastScrape = $upTargets[0].lastScrape
 } | ConvertTo-Json -Depth 5

@@ -4,7 +4,8 @@ param(
   [string]$GithubOwner = $env:DEVCONTROL_GITHUB_OWNER,
   [string]$GithubRepo = $env:DEVCONTROL_GITHUB_REPO,
   [string]$Region = "us-central1",
-  [string]$ServiceName = "devcontrol"
+  [string]$ServiceName = "devcontrol",
+  [switch]$AutoApprove
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,11 +78,17 @@ Push-Location "$PSScriptRoot\..\..\infra\gcp"
 try {
   terraform init
   Assert-LastExitCode "terraform init"
-  terraform apply `
-    -var "project_id=$ProjectId" `
-    -var "github_owner=$GithubOwner" `
-    -var "github_repo=$GithubRepo" `
-    -var "operator_google_account=$RequiredAccount"
+  $applyArgs = @(
+    "-var", "project_id=$ProjectId",
+    "-var", "github_owner=$GithubOwner",
+    "-var", "github_repo=$GithubRepo",
+    "-var", "operator_google_account=$RequiredAccount"
+  )
+  if ($AutoApprove) {
+    $applyArgs = @("-auto-approve") + $applyArgs
+  }
+
+  terraform apply @applyArgs
   Assert-LastExitCode "terraform apply"
 } finally {
   Pop-Location
