@@ -40,7 +40,7 @@ public sealed class ObservabilityProxyEndpointTests
         response.EnsureSuccessStatusCode();
         Assert.Equal("proxied:/observability/api/health?demo=1", await response.Content.ReadAsStringAsync());
         Assert.Equal("/observability/api/health?demo=1", received.RawUrl);
-        Assert.Equal("proxy-owner@example.test", received.User);
+        Assert.Equal("PROXY-OWNER@EXAMPLE.TEST", received.User);
         Assert.Equal("proxy-owner@example.test", received.Email);
         Assert.Equal("Proxy Owner", received.Name);
         Assert.Equal("Owner", received.Role);
