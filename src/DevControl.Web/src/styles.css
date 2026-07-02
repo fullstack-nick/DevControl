@@ -38,6 +38,21 @@ button:hover:not(:disabled) {
   border-color: #66758a;
 }
 
+.button-link {
+  min-height: 36px;
+  padding: 7px 12px;
+  color: #172033;
+  background: #ffffff;
+  border: 1px solid #c8d1df;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.button-link:hover {
+  border-color: #66758a;
+  text-decoration: none;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
@@ -156,6 +171,13 @@ h2 {
 .identity span:first-child {
   color: #172033;
   font-weight: 700;
+}
+
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .banner,

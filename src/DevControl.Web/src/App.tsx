@@ -6,6 +6,10 @@ type User = {
   displayName: string;
 };
 
+type PublicConfig = {
+  observabilityUrl?: string;
+};
+
 type Organization = {
   id: string;
   name: string;
@@ -597,6 +601,7 @@ export default function App() {
   const [releases, setReleases] = useState<StatusRelease[]>([]);
   const [publicStatus, setPublicStatus] = useState<PublicStatusPage | undefined>();
   const [publicStatusError, setPublicStatusError] = useState<string | undefined>();
+  const [observabilityUrl, setObservabilityUrl] = useState<string | undefined>();
   const [historyFlagId, setHistoryFlagId] = useState<string>("");
   const [selectedWebhookEndpointId, setSelectedWebhookEndpointId] = useState<string>("");
   const [selectedMonitorId, setSelectedMonitorId] = useState<string>("");
@@ -921,6 +926,12 @@ export default function App() {
 
   useEffect(() => {
     void loadMe();
+  }, []);
+
+  useEffect(() => {
+    api<PublicConfig>("/api/public/config")
+      .then((payload) => setObservabilityUrl(payload.observabilityUrl))
+      .catch(() => setObservabilityUrl(undefined));
   }, []);
 
   useEffect(() => {
@@ -1694,7 +1705,14 @@ export default function App() {
         <div className="identity">
           <span>{me?.user.displayName}</span>
           <span>{me?.user.email}</span>
-          <button onClick={logout} disabled={busy}>Sign out</button>
+          <div className="topbar-actions">
+            {observabilityUrl ? (
+              <a className="button-link" href={observabilityUrl} target="_blank" rel="noreferrer">
+                Observability
+              </a>
+            ) : null}
+            <button onClick={logout} disabled={busy}>Sign out</button>
+          </div>
         </div>
       </header>
 

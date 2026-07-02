@@ -165,6 +165,7 @@ app.MapWebhookEndpoints();
 app.MapMonitoringEndpoints();
 app.MapGitHubEndpoints();
 app.MapOperatorEndpoints();
+app.MapPublicConfigEndpoints();
 
 app.MapFallbackToFile("index.html");
 
