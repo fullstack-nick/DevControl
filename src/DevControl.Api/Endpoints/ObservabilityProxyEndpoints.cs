@@ -17,15 +17,29 @@ public static class ObservabilityProxyEndpoints
 
     public static void MapObservabilityProxyEndpoints(this WebApplication app)
     {
-        app.MapGet(ObservabilityProxyOptions.PathPrefix, () =>
-                Results.Redirect($"{ObservabilityProxyOptions.PathPrefix}/"))
-            .RequireAuthorization();
-
         app.MapMethods(
                 $"{ObservabilityProxyOptions.PathPrefix}/{{**path}}",
                 Methods,
-                async (HttpContext httpContext, ObservabilityProxyService proxy) =>
-                    await proxy.ProxyAsync(httpContext))
-            .RequireAuthorization();
+                ProxyOrRedirectToSignInAsync);
+    }
+
+    private static async Task ProxyOrRedirectToSignInAsync(HttpContext httpContext, ObservabilityProxyService proxy)
+    {
+        if (httpContext.User.Identity?.IsAuthenticated != true)
+        {
+            RedirectToAppSignIn(httpContext);
+            return;
+        }
+
+        await proxy.ProxyAsync(httpContext);
+    }
+
+    private static void RedirectToAppSignIn(HttpContext httpContext)
+    {
+        var returnUrl = Uri.EscapeDataString(
+            httpContext.Request.PathBase +
+            httpContext.Request.Path +
+            httpContext.Request.QueryString);
+        httpContext.Response.Redirect($"/?returnUrl={returnUrl}");
     }
 }

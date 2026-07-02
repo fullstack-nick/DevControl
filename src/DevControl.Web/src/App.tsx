@@ -1027,7 +1027,11 @@ export default function App() {
   }
 
   function login() {
-    window.location.href = `/auth/login?returnUrl=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    const returnUrl = new URLSearchParams(window.location.search).get("returnUrl");
+    const safeReturnUrl = returnUrl?.startsWith("/") && !returnUrl.startsWith("//")
+      ? returnUrl
+      : window.location.pathname + window.location.search;
+    window.location.href = `/auth/login?returnUrl=${encodeURIComponent(safeReturnUrl)}`;
   }
 
   async function logout() {

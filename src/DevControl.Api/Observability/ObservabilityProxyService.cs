@@ -30,12 +30,20 @@ public sealed class ObservabilityProxyService(
     {
         "Authorization",
         "Cookie",
+        "Critical-CH",
         "Host",
+        "Accept-CH",
         "X-CSRF-TOKEN",
         "X-WEBAUTH-USER",
         "X-WEBAUTH-EMAIL",
         "X-WEBAUTH-NAME",
         "X-WEBAUTH-ROLE"
+    };
+
+    private static readonly HashSet<string> BlockedResponseHeaders = new(HopByHopHeaders, StringComparer.OrdinalIgnoreCase)
+    {
+        "Accept-CH",
+        "Critical-CH"
     };
 
     public async Task ProxyAsync(HttpContext httpContext)
@@ -162,7 +170,7 @@ public sealed class ObservabilityProxyService(
         string name,
         IEnumerable<string> values)
     {
-        if (HopByHopHeaders.Contains(name))
+        if (BlockedResponseHeaders.Contains(name))
         {
             return;
         }

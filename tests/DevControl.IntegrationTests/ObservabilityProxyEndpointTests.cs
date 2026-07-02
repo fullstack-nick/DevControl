@@ -49,7 +49,7 @@ public sealed class ObservabilityProxyEndpointTests
     }
 
     [Fact]
-    public async Task ObservabilityProxy_RedirectsUnauthenticatedUsersToLogin()
+    public async Task ObservabilityProxy_RedirectsUnauthenticatedUsersToDevControlSignInScreen()
     {
         await using var upstream = await RecordingUpstream.StartAsync();
         await using var factory = new DevControlObservabilityProxyFactory(
@@ -63,7 +63,7 @@ public sealed class ObservabilityProxyEndpointTests
         var response = await client.GetAsync("/observability/");
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.StartsWith("http://localhost/auth/login", response.Headers.Location?.ToString(), StringComparison.Ordinal);
+        Assert.Equal("/?returnUrl=%2Fobservability%2F", response.Headers.Location?.ToString());
     }
 
     private static async Task<T> PostJsonAsync<T>(HttpClient client, string path, object payload)
