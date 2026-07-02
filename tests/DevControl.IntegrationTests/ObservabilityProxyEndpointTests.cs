@@ -49,6 +49,44 @@ public sealed class ObservabilityProxyEndpointTests
     }
 
     [Fact]
+    public async Task ObservabilityProxy_ForwardsGrafanaPostQueryBodyAndContentHeaders()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        await using var upstream = await RecordingUpstream.StartAsync();
+        await using var factory = new DevControlObservabilityProxyFactory(connectionString, upstream.Url);
+        await factory.MigrateAsync();
+
+        using var client = await factory.CreateAuthenticatedClientAsync("proxy-query@example.test", "Proxy Query");
+        _ = await PostJsonAsync<OrganizationDto>(
+            client,
+            "/api/organizations",
+            new { name = $"Proxy Query Org {Guid.NewGuid():N}", slug = "" });
+
+        using var content = new StringContent(
+            "{\"queries\":[{\"expr\":\"up\"}]}",
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await client.PostAsync(
+            "/observability/api/ds/query?ds_type=prometheus&requestId=SQR-test",
+            content);
+        var received = await upstream.ReceiveAsync();
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("proxied:/observability/api/ds/query?ds_type=prometheus&requestId=SQR-test", await response.Content.ReadAsStringAsync());
+        Assert.Equal("POST", received.Method);
+        Assert.Equal("/observability/api/ds/query?ds_type=prometheus&requestId=SQR-test", received.RawUrl);
+        Assert.Equal("application/json; charset=utf-8", received.ContentType);
+        Assert.Equal("{\"queries\":[{\"expr\":\"up\"}]}", received.Body);
+        Assert.Equal("PROXY-QUERY@EXAMPLE.TEST", received.User);
+    }
+
+    [Fact]
     public async Task ObservabilityProxy_RedirectsUnauthenticatedUsersToDevControlSignInScreen()
     {
         await using var upstream = await RecordingUpstream.StartAsync();
@@ -185,8 +223,13 @@ public sealed class ObservabilityProxyEndpointTests
         {
             var context = await listener.GetContextAsync();
             var request = context.Request;
+            using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+            var requestBody = await reader.ReadToEndAsync();
             received.TrySetResult(new ReceivedRequest(
+                request.HttpMethod,
                 request.RawUrl ?? string.Empty,
+                request.ContentType,
+                requestBody,
                 request.Headers["X-WEBAUTH-USER"],
                 request.Headers["X-WEBAUTH-EMAIL"],
                 request.Headers["X-WEBAUTH-NAME"],
@@ -213,7 +256,10 @@ public sealed class ObservabilityProxyEndpointTests
     }
 
     private sealed record ReceivedRequest(
+        string Method,
         string RawUrl,
+        string? ContentType,
+        string Body,
         string? User,
         string? Email,
         string? Name,

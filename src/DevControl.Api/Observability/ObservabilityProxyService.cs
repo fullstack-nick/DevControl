@@ -46,6 +46,20 @@ public sealed class ObservabilityProxyService(
         "Critical-CH"
     };
 
+    private static readonly HashSet<string> ContentHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Content-Disposition",
+        "Content-Encoding",
+        "Content-Language",
+        "Content-Length",
+        "Content-Location",
+        "Content-MD5",
+        "Content-Range",
+        "Content-Type",
+        "Expires",
+        "Last-Modified"
+    };
+
     public async Task ProxyAsync(HttpContext httpContext)
     {
         var upstream = options.ResolveUpstream(httpContext);
@@ -88,7 +102,7 @@ public sealed class ObservabilityProxyService(
 
         foreach (var header in httpContext.Request.Headers)
         {
-            if (BlockedRequestHeaders.Contains(header.Key))
+            if (BlockedRequestHeaders.Contains(header.Key) || ContentHeaders.Contains(header.Key))
             {
                 continue;
             }
@@ -101,8 +115,7 @@ public sealed class ObservabilityProxyService(
             request.Content = new StreamContent(httpContext.Request.Body);
             foreach (var header in httpContext.Request.Headers)
             {
-                if (!BlockedRequestHeaders.Contains(header.Key) &&
-                    !request.Headers.Contains(header.Key))
+                if (!BlockedRequestHeaders.Contains(header.Key) && ContentHeaders.Contains(header.Key))
                 {
                     request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
                 }
