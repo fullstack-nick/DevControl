@@ -145,6 +145,12 @@ variable "operator_bootstrap_secret" {
   sensitive   = true
 }
 
+variable "operator_bootstrap_enabled" {
+  description = "Explicit break-glass flag for the audited live-proof bootstrap endpoint. Keep false in normal production."
+  type        = bool
+  default     = false
+}
+
 variable "github_app_id" {
   description = "Optional GitHub App ID used for Stage 8 repo onboarding and live control."
   type        = string
@@ -156,6 +162,28 @@ variable "github_app_private_key" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "setup_action_ref" {
+  description = "GitHub Actions uses reference inserted into generated DevControl CLI setup snippets."
+  type        = string
+  default     = "fullstack-nick/DevControl/.github/actions/setup-devcontrol@main"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*@[-A-Za-z0-9_./]+$", var.setup_action_ref)) && !can(regex("\\.\\.", var.setup_action_ref))
+    error_message = "setup_action_ref must be a GitHub action reference such as owner/repo/path@ref."
+  }
+}
+
+variable "public_base_url" {
+  description = "Optional canonical public DevControl base URL used for generated snippets and GitHub OIDC audiences. Leave empty to use the request host."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.public_base_url == "" || can(regex("^https?://\\S+$", var.public_base_url))
+    error_message = "public_base_url must be empty or an absolute http/https URL without whitespace."
+  }
 }
 
 variable "smtp_use_starttls" {

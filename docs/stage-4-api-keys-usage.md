@@ -51,7 +51,8 @@ onboarding, workflow dispatch, or a public SDK. Those stay in later stages.
 ## Operator live proof
 
 Production live proof should use the audited operator bootstrap path instead
-of direct database inserts. Configure `TF_VAR_operator_bootstrap_secret`, deploy
+of direct database inserts. Configure `TF_VAR_operator_bootstrap_secret` and set
+`TF_VAR_operator_bootstrap_enabled=true` only for the proof window, deploy
 DevControl, then run:
 
 ```bash
@@ -62,5 +63,7 @@ devcontrol admin bootstrap-live-proof \
   --json
 ```
 
-The endpoint is disabled when the operator secret is not configured. The
-returned registration token and API key are show-once secrets.
+The endpoint is disabled unless the explicit enable flag and operator secret are
+both configured. Turn `TF_VAR_operator_bootstrap_enabled` back to `false` after
+the proof window. The returned registration token and API key are show-once
+secrets.

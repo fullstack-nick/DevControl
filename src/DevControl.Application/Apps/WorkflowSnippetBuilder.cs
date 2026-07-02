@@ -1,4 +1,5 @@
 using System.Text;
+using DevControl.Application.GitHub;
 
 namespace DevControl.Application.Apps;
 
@@ -10,7 +11,8 @@ public sealed record WorkflowSnippetContext(
     string HealthUrlPlaceholder,
     string VersionPlaceholder,
     string ImageDigestPlaceholder,
-    string Capabilities);
+    string Capabilities,
+    string SetupActionReference = DevControlSetupActionReference.Default);
 
 public static class WorkflowSnippetBuilder
 {
@@ -18,7 +20,7 @@ public static class WorkflowSnippetBuilder
     {
         var builder = new StringBuilder();
         builder.AppendLine("- name: Install DevControl CLI");
-        builder.AppendLine("  uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main");
+        builder.AppendLine($"  uses: {DevControlSetupActionReference.Normalize(context.SetupActionReference)}");
         builder.AppendLine();
         builder.AppendLine("- name: Register app in DevControl");
         builder.AppendLine("  env:");

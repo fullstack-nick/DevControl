@@ -101,7 +101,7 @@ resource "google_secret_manager_secret_iam_member" "runtime_can_read_smtp_passwo
 }
 
 resource "google_secret_manager_secret_iam_member" "runtime_can_read_operator_bootstrap_secret" {
-  count     = var.operator_bootstrap_secret == "" ? 0 : 1
+  count     = var.operator_bootstrap_enabled && var.operator_bootstrap_secret != "" ? 1 : 0
   secret_id = google_secret_manager_secret.operator_bootstrap_secret[0].id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.runtime.email}"

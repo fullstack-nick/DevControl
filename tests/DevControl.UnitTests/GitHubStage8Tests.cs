@@ -184,6 +184,38 @@ public sealed class GitHubStage8Tests
     }
 
     [Fact]
+    public void OnboardingPatch_UsesConfiguredSetupActionReference()
+    {
+        const string workflow = """
+                                name: Deploy
+                                on:
+                                  workflow_dispatch:
+                                jobs:
+                                  deploy:
+                                    runs-on: ubuntu-latest
+                                    steps:
+                                      - uses: actions/checkout@v4
+                                """;
+
+        var result = GitHubWorkflowOnboardingPatchBuilder.Build(new GitHubWorkflowOnboardingRequest(
+            workflow,
+            "deploy",
+            "https://devcontrol.example.com",
+            "https://devcontrol.example.com/api/apps/register",
+            "production",
+            "$SERVICE_URL",
+            "$SERVICE_URL/health",
+            "${{ github.sha }}",
+            "$IMAGE_DIGEST",
+            "health,deployment-events,deploy",
+            "acme/devcontrol-actions/.github/actions/setup-devcontrol@v1"));
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Contains("uses: acme/devcontrol-actions/.github/actions/setup-devcontrol@v1", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(DevControlSetupActionReference.Default, result.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OnboardingPatch_FailsWhenJobStepsCannotBeFound()
     {
         const string workflow = """

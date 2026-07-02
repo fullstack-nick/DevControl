@@ -131,6 +131,7 @@ public static class GitHubEndpoints
         TenantAccessService tenantAccess,
         DevControlDbContext dbContext,
         IGitHubAppClient gitHubAppClient,
+        IConfiguration configuration,
         AuditLogWriter auditLogWriter,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
@@ -176,8 +177,9 @@ public static class GitHubEndpoints
         }
 
         var file = await gitHubAppClient.GetFileContentAsync(input.Repo, installation.InstallationId, workflow.Path, repository.DefaultBranch, cancellationToken);
-        var serverUrl = AppRegistryEndpoints.BuildPublicBaseUrl(httpContext);
-        var audience = AppRegistryEndpoints.BuildRegistrationAudience(httpContext);
+        var serverUrl = AppRegistryEndpoints.BuildPublicBaseUrl(httpContext, configuration);
+        var audience = AppRegistryEndpoints.BuildRegistrationAudience(httpContext, configuration);
+        var setupActionReference = DevControlSetupActionReference.Normalize(configuration["SETUP_ACTION_REF"]);
         var patch = GitHubWorkflowOnboardingPatchBuilder.Build(new GitHubWorkflowOnboardingRequest(
             file.Content,
             input.JobId,
@@ -188,12 +190,13 @@ public static class GitHubEndpoints
             input.HealthUrlExpression,
             input.VersionExpression,
             input.ImageDigestExpression,
-            string.Join(",", input.Capabilities)));
+            string.Join(",", input.Capabilities),
+            setupActionReference));
         if (!patch.Succeeded)
         {
             return Results.BadRequest(new GitHubOnboardingValidationResponse(
                 [patch.Error ?? "Workflow could not be patched safely."],
-                BuildManualOidcSnippet(serverUrl, audience, scope.Environment.Slug, input)));
+                BuildManualOidcSnippet(serverUrl, audience, scope.Environment.Slug, input, setupActionReference)));
         }
 
         var connection = await dbContext.GitHubRepoConnections
@@ -798,7 +801,12 @@ public static class GitHubEndpoints
                """;
     }
 
-    private static string BuildManualOidcSnippet(string serverUrl, string audience, string environmentSlug, NormalizedOnboardingInput input)
+    private static string BuildManualOidcSnippet(
+        string serverUrl,
+        string audience,
+        string environmentSlug,
+        NormalizedOnboardingInput input,
+        string setupActionReference)
     {
         return string.Join('\n', new[]
         {
@@ -807,7 +815,7 @@ public static class GitHubEndpoints
             "",
             "steps:",
             "  - name: Install DevControl CLI",
-            "    uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main",
+            $"    uses: {setupActionReference}",
             "",
             "  - name: Request DevControl OIDC token",
             "    uses: actions/github-script@v8",

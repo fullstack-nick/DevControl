@@ -42,6 +42,7 @@ public static class AppRegistryEndpoints
         DevControlDbContext dbContext,
         RegistrationTokenService tokenService,
         IGitHubOidcTokenValidator gitHubOidcTokenValidator,
+        IConfiguration configuration,
         AuditLogWriter auditLogWriter,
         MonitorProvisioningService monitorProvisioningService,
         WebhookEventPublisher webhookEventPublisher,
@@ -71,6 +72,7 @@ public static class AppRegistryEndpoints
             dbContext,
             tokenService,
             gitHubOidcTokenValidator,
+            configuration,
             cancellationToken);
         if (registrationContext.Failure is not null)
         {
@@ -343,6 +345,7 @@ public static class AppRegistryEndpoints
         DevControlDbContext dbContext,
         AuditLogWriter auditLogWriter,
         RegistrationTokenService tokenService,
+        IConfiguration configuration,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -407,14 +410,15 @@ public static class AppRegistryEndpoints
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var snippet = WorkflowSnippetBuilder.Build(new WorkflowSnippetContext(
-            $"{httpContext.Request.Scheme}://{httpContext.Request.Host}",
+            BuildPublicBaseUrl(httpContext, configuration),
             secret.Secret,
             environment.Slug,
             "<service-url-from-deploy-step>",
             "<health-url-from-deploy-step>",
             "${{ github.ref_name }}",
             "<image-digest-from-deploy-step>",
-            "health,deployment-events"));
+            "health,deployment-events",
+            DevControlSetupActionReference.Normalize(configuration["SETUP_ACTION_REF"])));
 
         return Results.Created(
             $"/api/organizations/{organizationId}/registration-tokens/{token.Id}",
@@ -532,6 +536,7 @@ public static class AppRegistryEndpoints
         DevControlDbContext dbContext,
         RegistrationTokenService tokenService,
         IGitHubOidcTokenValidator gitHubOidcTokenValidator,
+        IConfiguration configuration,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(request.GitHubOidcToken))
@@ -542,6 +547,7 @@ public static class AppRegistryEndpoints
                 httpContext,
                 dbContext,
                 gitHubOidcTokenValidator,
+                configuration,
                 cancellationToken);
         }
 
@@ -600,11 +606,12 @@ public static class AppRegistryEndpoints
         HttpContext httpContext,
         DevControlDbContext dbContext,
         IGitHubOidcTokenValidator gitHubOidcTokenValidator,
+        IConfiguration configuration,
         CancellationToken cancellationToken)
     {
         var claims = await gitHubOidcTokenValidator.ValidateAsync(
             oidcToken,
-            BuildRegistrationAudience(httpContext),
+            BuildRegistrationAudience(httpContext, configuration),
             cancellationToken);
         if (claims is null)
         {
@@ -672,21 +679,28 @@ public static class AppRegistryEndpoints
         return workflowRef.StartsWith($"{repository}/{workflowPath}@", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string BuildRegistrationAudience(HttpContext httpContext)
+    public static string BuildRegistrationAudience(HttpContext httpContext, IConfiguration configuration)
     {
-        return $"{BuildPublicBaseUrl(httpContext)}/api/apps/register";
+        return $"{BuildPublicBaseUrl(httpContext, configuration)}/api/apps/register";
     }
 
-    public static string BuildPublicBaseUrl(HttpContext httpContext)
+    public static string BuildPublicBaseUrl(HttpContext httpContext, IConfiguration configuration)
     {
-        var scheme = httpContext.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && !string.IsNullOrWhiteSpace(forwardedProto.ToString())
-            ? forwardedProto.ToString().Split(',')[0].Trim()
-            : httpContext.Request.Scheme;
-        var host = httpContext.Request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost) && !string.IsNullOrWhiteSpace(forwardedHost.ToString())
-            ? forwardedHost.ToString().Split(',')[0].Trim()
-            : httpContext.Request.Host.Value;
+        var configuredBaseUrl = configuration["PUBLIC_BASE_URL"];
+        if (!string.IsNullOrWhiteSpace(configuredBaseUrl))
+        {
+            if (!Uri.TryCreate(configuredBaseUrl.TrimEnd('/'), UriKind.Absolute, out var configuredUri) ||
+                (!string.Equals(configuredUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(configuredUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)) ||
+                string.IsNullOrWhiteSpace(configuredUri.Host))
+            {
+                throw new InvalidOperationException("DEVCONTROL_PUBLIC_BASE_URL must be an absolute http or https URL.");
+            }
 
-        return $"{scheme}://{host}".TrimEnd('/');
+            return configuredUri.ToString().TrimEnd('/');
+        }
+
+        return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
     }
 
     private static IReadOnlyList<string> DeserializeCapabilities(string capabilitiesJson)

@@ -26,7 +26,25 @@ public sealed class OperatorBootstrapEndpointTests
             return;
         }
 
-        await using var factory = new OperatorBootstrapFactory(connectionString, null);
+        await using var factory = new OperatorBootstrapFactory(connectionString, null, enabled: true);
+        await factory.ResetDatabaseAsync();
+        using var client = factory.CreateClient();
+
+        var response = await PostBootstrapRawAsync(client, OperatorSecret, new { ownerEmail = "owner@example.com" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BootstrapLiveProof_IsDisabledUnlessExplicitlyEnabled()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        await using var factory = new OperatorBootstrapFactory(connectionString, OperatorSecret, enabled: false);
         await factory.ResetDatabaseAsync();
         using var client = factory.CreateClient();
 
@@ -44,7 +62,7 @@ public sealed class OperatorBootstrapEndpointTests
             return;
         }
 
-        await using var factory = new OperatorBootstrapFactory(connectionString, OperatorSecret);
+        await using var factory = new OperatorBootstrapFactory(connectionString, OperatorSecret, enabled: true);
         await factory.ResetDatabaseAsync();
         using var client = factory.CreateClient();
 
@@ -151,13 +169,16 @@ public sealed class OperatorBootstrapEndpointTests
     {
         private readonly string? originalConnectionString;
         private readonly string? originalOperatorSecret;
+        private readonly string? originalOperatorEnabled;
 
-        public OperatorBootstrapFactory(string connectionString, string? operatorSecret)
+        public OperatorBootstrapFactory(string connectionString, string? operatorSecret, bool enabled)
         {
             originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DevControl");
             originalOperatorSecret = Environment.GetEnvironmentVariable("DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET");
+            originalOperatorEnabled = Environment.GetEnvironmentVariable("DEVCONTROL_OPERATOR_BOOTSTRAP_ENABLED");
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", connectionString);
             Environment.SetEnvironmentVariable("DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET", operatorSecret);
+            Environment.SetEnvironmentVariable("DEVCONTROL_OPERATOR_BOOTSTRAP_ENABLED", enabled ? "true" : null);
         }
 
         public async Task ResetDatabaseAsync()
@@ -226,6 +247,7 @@ public sealed class OperatorBootstrapEndpointTests
         {
             Environment.SetEnvironmentVariable("ConnectionStrings__DevControl", originalConnectionString);
             Environment.SetEnvironmentVariable("DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET", originalOperatorSecret);
+            Environment.SetEnvironmentVariable("DEVCONTROL_OPERATOR_BOOTSTRAP_ENABLED", originalOperatorEnabled);
             base.Dispose(disposing);
         }
     }

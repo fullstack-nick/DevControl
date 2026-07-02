@@ -13,7 +13,8 @@ public sealed record GitHubWorkflowOnboardingRequest(
     string HealthUrlExpression,
     string VersionExpression,
     string ImageDigestExpression,
-    string Capabilities);
+    string Capabilities,
+    string SetupActionReference = DevControlSetupActionReference.Default);
 
 public sealed record GitHubWorkflowOnboardingResult(bool Succeeded, string Content, string? Error)
 {
@@ -46,7 +47,8 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         }
 
         normalized = EnsureIdTokenPermission(normalized);
-        var shouldInstallCli = !JobContainsSetupDevControl(normalized, request.JobId);
+        var setupActionReference = DevControlSetupActionReference.Normalize(request.SetupActionReference);
+        var shouldInstallCli = !JobContainsSetupDevControl(normalized, request.JobId, setupActionReference);
         var block = BuildBlock(request, shouldInstallCli);
 
         var markerStart = normalized.IndexOf(StartMarker, StringComparison.Ordinal);
@@ -194,7 +196,7 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         return -1;
     }
 
-    private static bool JobContainsSetupDevControl(string content, string jobId)
+    private static bool JobContainsSetupDevControl(string content, string jobId, string setupActionReference)
     {
         var lines = content.Split('\n');
         var jobStart = FindJobStart(lines, jobId);
@@ -210,7 +212,9 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
                 return false;
             }
 
-            if (lines[i].Contains("fullstack-nick/DevControl/.github/actions/setup-devcontrol@", StringComparison.OrdinalIgnoreCase))
+            if (lines[i].Contains(setupActionReference, StringComparison.OrdinalIgnoreCase) ||
+                lines[i].Contains(DevControlSetupActionReference.Default, StringComparison.OrdinalIgnoreCase) ||
+                SetupDevControlActionRegex().IsMatch(lines[i]))
             {
                 return true;
             }
@@ -300,7 +304,7 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         if (includeCliInstall)
         {
             builder.AppendLine("      - name: Install DevControl CLI");
-            builder.AppendLine("        uses: fullstack-nick/DevControl/.github/actions/setup-devcontrol@main");
+            builder.AppendLine($"        uses: {DevControlSetupActionReference.Normalize(request.SetupActionReference)}");
             builder.AppendLine();
         }
 
@@ -346,6 +350,9 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
 
     [GeneratedRegex("^permissions:[ \\t]*\\S+", RegexOptions.Multiline)]
     private static partial Regex ScalarPermissionsRegex();
+
+    [GeneratedRegex("uses:\\s*\\S+/\\.github/actions/setup-devcontrol@\\S+", RegexOptions.IgnoreCase)]
+    private static partial Regex SetupDevControlActionRegex();
 
     private sealed record TextRange(int Start, int End);
 }

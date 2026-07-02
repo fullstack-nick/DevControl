@@ -35,6 +35,11 @@ public static class OperatorEndpoints
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
+        if (!IsOperatorBootstrapEnabled(configuration))
+        {
+            return Results.NotFound();
+        }
+
         var configuredSecret = configuration["OPERATOR_BOOTSTRAP_SECRET"];
         if (string.IsNullOrWhiteSpace(configuredSecret))
         {
@@ -273,6 +278,13 @@ public static class OperatorEndpoints
             new OperatorBootstrapApiKeyResponse(apiKey.Id, apiKey.Name, apiKey.KeyPrefix, ApiKeyScopes.FromJson(apiKey.ScopesJson), apiKey.RateLimitPerMinute, apiKeySecret.Secret),
             revokedRegistrationTokenIds,
             revokedApiKeyIds));
+    }
+
+    private static bool IsOperatorBootstrapEnabled(IConfiguration configuration)
+    {
+        var configured = configuration["OPERATOR_BOOTSTRAP_ENABLED"];
+        return string.Equals(configured, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(configured, "1", StringComparison.Ordinal);
     }
 
     private static async Task<IReadOnlyList<Guid>> RevokePriorRegistrationTokensAsync(

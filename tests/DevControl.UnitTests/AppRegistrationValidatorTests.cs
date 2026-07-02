@@ -1,5 +1,9 @@
+using DevControl.Api.Endpoints;
 using DevControl.Application.Apps;
+using DevControl.Application.GitHub;
 using DevControl.Application.Security;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace DevControl.UnitTests;
@@ -84,5 +88,75 @@ public sealed class AppRegistrationValidatorTests
         Assert.Contains("--repo ${{ github.repository }}", snippet, StringComparison.Ordinal);
         Assert.DoesNotContain("src/DevControl.Cli", snippet, StringComparison.Ordinal);
         Assert.DoesNotContain("./.devcontrol-bin/devcontrol", snippet, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkflowSnippet_UsesConfiguredSetupActionReference()
+    {
+        var snippet = WorkflowSnippetBuilder.Build(new WorkflowSnippetContext(
+            "https://devcontrol.example.com",
+            "dcr_secret",
+            "production",
+            "$SERVICE_URL",
+            "$HEALTH_URL",
+            "${{ github.ref_name }}",
+            "$IMAGE_DIGEST",
+            "health,deployment-events",
+            "acme/devcontrol-actions/.github/actions/setup-devcontrol@v1"));
+
+        Assert.Contains("uses: acme/devcontrol-actions/.github/actions/setup-devcontrol@v1", snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain(DevControlSetupActionReference.Default, snippet, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkflowSnippet_RejectsUnsafeSetupActionReference()
+    {
+        Assert.Throws<ArgumentException>(() => WorkflowSnippetBuilder.Build(new WorkflowSnippetContext(
+            "https://devcontrol.example.com",
+            "dcr_secret",
+            "production",
+            "$SERVICE_URL",
+            "$HEALTH_URL",
+            "${{ github.ref_name }}",
+            "$IMAGE_DIGEST",
+            "health,deployment-events",
+            "acme/setup@v1\nrun: echo injected")));
+    }
+
+    [Fact]
+    public void BuildPublicBaseUrl_UsesConfiguredCanonicalUrl_WhenPresent()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("request.example.com");
+        context.Request.Headers.Host = "evil.example.com";
+        context.Request.Headers["X-Forwarded-Host"] = "evil.example.com";
+        var configuration = Configuration(("PUBLIC_BASE_URL", "https://devcontrol.example.com/"));
+
+        var value = AppRegistryEndpoints.BuildPublicBaseUrl(context, configuration);
+
+        Assert.Equal("https://devcontrol.example.com", value);
+    }
+
+    [Fact]
+    public void BuildPublicBaseUrl_DoesNotReadForwardedHostHeaderDirectly()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("request.example.com");
+        context.Request.Headers["X-Forwarded-Host"] = "evil.example.com";
+        var configuration = Configuration();
+
+        var value = AppRegistryEndpoints.BuildPublicBaseUrl(context, configuration);
+
+        Assert.Equal("https://request.example.com", value);
+    }
+
+    private static IConfiguration Configuration(params (string Key, string Value)[] values)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values.Select(value =>
+                new KeyValuePair<string, string?>(value.Key, value.Value)))
+            .Build();
     }
 }

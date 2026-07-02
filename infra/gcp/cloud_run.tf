@@ -127,6 +127,20 @@ resource "google_cloud_run_v2_service" "devcontrol" {
         value = tostring(var.smtp_use_starttls)
       }
 
+      env {
+        name  = "DEVCONTROL_SETUP_ACTION_REF"
+        value = var.setup_action_ref
+      }
+
+      dynamic "env" {
+        for_each = var.public_base_url == "" ? [] : [trimsuffix(var.public_base_url, "/")]
+
+        content {
+          name  = "DEVCONTROL_PUBLIC_BASE_URL"
+          value = env.value
+        }
+      }
+
       dynamic "env" {
         for_each = var.auth_google_client_id == "" ? [] : [var.auth_google_client_id]
 
@@ -185,7 +199,16 @@ resource "google_cloud_run_v2_service" "devcontrol" {
       }
 
       dynamic "env" {
-        for_each = var.operator_bootstrap_secret == "" ? [] : [1]
+        for_each = var.operator_bootstrap_enabled ? [1] : []
+
+        content {
+          name  = "DEVCONTROL_OPERATOR_BOOTSTRAP_ENABLED"
+          value = "true"
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.operator_bootstrap_enabled && var.operator_bootstrap_secret != "" ? [1] : []
 
         content {
           name = "DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET"
