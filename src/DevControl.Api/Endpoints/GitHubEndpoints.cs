@@ -534,11 +534,7 @@ public static class GitHubEndpoints
             return Results.Problem($"GitHub workflow dispatch failed: {exception.Message}", statusCode: StatusCodes.Status502BadGateway);
         }
 
-        var runUrl = !string.IsNullOrWhiteSpace(dispatchInfo.RunUrl)
-            ? dispatchInfo.RunUrl
-            : dispatchInfo.RunId.HasValue
-                ? $"https://github.com/{repo.FullName}/actions/runs/{dispatchInfo.RunId.Value}"
-                : string.Empty;
+        var runUrl = ResolveInitialRunUrl(repo, connection.WorkflowPath, dispatchInfo);
         var dispatch = new GitHubWorkflowDispatch(
             organizationId,
             liveApp.ProjectId,
@@ -570,6 +566,27 @@ public static class GitHubEndpoints
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return Results.Accepted($"/api/organizations/{organizationId}/github/workflow-dispatches/{dispatch.Id}", ToWorkflowDispatchResponse(dispatch, liveApp, controlAction));
+    }
+
+    private static string ResolveInitialRunUrl(GitHubRepoName repo, string workflowPath, GitHubWorkflowDispatchInfo dispatchInfo)
+    {
+        if (!string.IsNullOrWhiteSpace(dispatchInfo.RunUrl))
+        {
+            return dispatchInfo.RunUrl;
+        }
+
+        if (dispatchInfo.RunId.HasValue)
+        {
+            return $"https://github.com/{repo.FullName}/actions/runs/{dispatchInfo.RunId.Value}";
+        }
+
+        var workflowFileName = workflowPath
+            .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+            .LastOrDefault();
+
+        return string.IsNullOrWhiteSpace(workflowFileName)
+            ? $"https://github.com/{repo.FullName}/actions"
+            : $"https://github.com/{repo.FullName}/actions/workflows/{Uri.EscapeDataString(workflowFileName)}";
     }
 
     private static async Task<GitHubInstallation?> UpsertInstallationAsync(

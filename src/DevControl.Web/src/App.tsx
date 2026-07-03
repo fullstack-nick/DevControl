@@ -1222,10 +1222,11 @@ export default function App() {
     await runMutation(async () => {
       const reason = appActionReasons[app.id] ?? "";
       const targetDeploymentId = action === "rollback" ? rollbackTargets[app.id] || undefined : undefined;
-      await api<GitHubWorkflowDispatch>(`/api/organizations/${selectedOrgId}/apps/${app.id}/actions/${action}`, {
+      const dispatch = await api<GitHubWorkflowDispatch>(`/api/organizations/${selectedOrgId}/apps/${app.id}/actions/${action}`, {
         method: "POST",
         body: JSON.stringify({ reason, targetDeploymentId })
       });
+      setGitHubWorkflowDispatches((current) => [dispatch, ...current.filter((candidate) => candidate.id !== dispatch.id)]);
       await refreshOrgData(selectedOrgId);
       setNotice(`${action} workflow dispatched.`);
     });

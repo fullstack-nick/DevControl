@@ -167,6 +167,57 @@ public sealed partial class GitHubEndpointTests
         Assert.Equal("deploy", fakeGitHub.LastDispatchInputs["devcontrol_action"]);
     }
 
+    [Fact]
+    public async Task LiveControl_ReturnsWorkflowUrlImmediatelyWhenRunIdIsNotVisibleYet()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var fakeGitHub = new FakeGitHubAppClient
+        {
+            DispatchInfo = new GitHubWorkflowDispatchInfo(null, string.Empty)
+        };
+        await using var factory = new DevControlStage8Factory(connectionString, fakeGitHub);
+        await factory.ResetDatabaseAsync();
+        using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
+        var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
+        _ = await PostJsonAsync<OnboardingPrDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/github/onboarding-prs",
+            OnboardingPayload(project.Id, environment.Id));
+
+        using var anonymousClient = factory.CreateClient();
+        _ = await anonymousClient.PostAsJsonAsync("/api/apps/register", new
+        {
+            repo = FakeGitHubAppClient.Repo,
+            environment = environment.Slug,
+            serviceUrl = "https://sample.example.com",
+            healthUrl = "https://sample.example.com/health",
+            commitSha = "abcdef1234567890",
+            version = "v1",
+            imageDigest = "sha256:v1",
+            capabilities = new[] { "health", "deployment-events", "deploy", "redeploy", "rollback" },
+            gitHubOidcToken = "valid"
+        });
+        var app = (await ownerClient.GetFromJsonAsync<List<LiveAppDto>>($"/api/organizations/{organization.Id}/apps"))!.Single();
+
+        var accepted = await PostJsonAsync<WorkflowDispatchDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/apps/{app.Id}/actions/redeploy",
+            new { reason = "verify immediate run link" });
+
+        Assert.Equal($"https://github.com/{FakeGitHubAppClient.Repo}/actions/workflows/deploy.yml", accepted.RunUrl);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
+        var dispatch = await dbContext.GitHubWorkflowDispatches.SingleAsync();
+        Assert.Null(dispatch.GitHubRunId);
+        Assert.Equal($"https://github.com/{FakeGitHubAppClient.Repo}/actions/workflows/deploy.yml", dispatch.RunUrl);
+    }
+
     private static object OnboardingPayload(Guid projectId, Guid environmentId)
     {
         return new
@@ -328,6 +379,8 @@ public sealed partial class GitHubEndpointTests
 
         public IReadOnlyDictionary<string, string> LastDispatchInputs { get; private set; } = new Dictionary<string, string>();
 
+        public GitHubWorkflowDispatchInfo DispatchInfo { get; init; } = new(987654321, $"https://github.com/{Repo}/actions/runs/987654321");
+
         public Task<GitHubInstallationInfo?> GetRepositoryInstallationAsync(GitHubRepoName repo, CancellationToken cancellationToken)
         {
             return Task.FromResult<GitHubInstallationInfo?>(new GitHubInstallationInfo(123, "fullstack-nick", "User", "selected", "{}"));
@@ -389,7 +442,7 @@ public sealed partial class GitHubEndpointTests
             CancellationToken cancellationToken)
         {
             LastDispatchInputs = new Dictionary<string, string>(inputs);
-            return Task.FromResult(new GitHubWorkflowDispatchInfo(987654321, $"https://github.com/{Repo}/actions/runs/987654321"));
+            return Task.FromResult(DispatchInfo);
         }
 
         public Task<GitHubWorkflowRunInfo?> GetWorkflowRunAsync(GitHubRepoName repo, long installationId, long runId, CancellationToken cancellationToken)
@@ -463,4 +516,6 @@ public sealed partial class GitHubEndpointTests
     private sealed record OnboardingPrDto(Guid Id, int PullRequestNumber, string PullRequestUrl);
 
     private sealed record LiveAppDto(Guid Id);
+
+    private sealed record WorkflowDispatchDto(Guid Id, string RunUrl);
 }
