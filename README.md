@@ -75,8 +75,25 @@ There are two honest ways to demo this:
 - Use the sample app repo for a stable, repeatable end-to-end demo. It is already designed to expose health, API-key, feature-flag, deploy, redeploy, and rollback behavior.
 - Use a fresh throwaway repo for a first-time onboarding demo. This proves DevControl can add itself to a repo that was not already wired for the product.
 
-For a fresh repo, use one with a GitHub Actions deploy workflow and a reachable
-health URL. In DevControl:
+DevControl does not turn an arbitrary source repo into a deployable app by
+itself. It works with repos that already have, or can be adapted to have, a
+normal deployment surface:
+
+- A GitHub Actions workflow that deploys the app.
+- A stable workflow job that runs after checkout/build/deploy.
+- A deployed service URL that is known after deployment, either as a literal
+  URL or as a workflow expression/output.
+- A reachable health URL that returns `2xx` when the app is healthy.
+- Commit/version/image values that can be supplied from GitHub context,
+  workflow outputs, or literals.
+- Optional `workflow_dispatch` inputs if you want DevControl buttons for
+  deploy, redeploy, or rollback.
+
+Only declare capabilities the repo truly supports. For example, use `health`
+and `deployment-events` for passive registration; add `deploy`, `redeploy`, or
+`rollback` only when the workflow has matching `workflow_dispatch` behavior.
+
+For a fresh repo that meets those requirements, open DevControl:
 
 1. Open GitHub onboarding.
 2. Enter the repo as `owner/name` or a GitHub URL.
