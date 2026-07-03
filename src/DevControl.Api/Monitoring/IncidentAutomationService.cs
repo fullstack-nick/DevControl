@@ -34,11 +34,18 @@ public sealed class IncidentAutomationService(
         }
 
         if (check.Status is MonitorStatus.Up or MonitorStatus.Slow &&
-            previousStatus == MonitorStatus.Down &&
             monitor.ConsecutiveRecoveries >= monitor.RecoveryThreshold)
         {
-            await PublishMonitorEventAsync(WebhookEventTypes.MonitorRecovered, monitor, check, now, cancellationToken);
-            await ResolveActiveIncidentsAsync(monitor, check, now, cancellationToken);
+            var hasActiveIncident = await HasActiveIncidentAsync(monitor.Id, cancellationToken);
+            if (previousStatus == MonitorStatus.Down || hasActiveIncident)
+            {
+                await PublishMonitorEventAsync(WebhookEventTypes.MonitorRecovered, monitor, check, now, cancellationToken);
+            }
+
+            if (hasActiveIncident)
+            {
+                await ResolveActiveIncidentsAsync(monitor, check, now, cancellationToken);
+            }
         }
     }
 

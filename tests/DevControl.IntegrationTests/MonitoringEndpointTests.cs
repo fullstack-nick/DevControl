@@ -125,6 +125,64 @@ public sealed partial class MonitoringEndpointTests
     }
 
     [Fact]
+    public async Task SchedulerResolvesLinkedIncidentAfterMonitorResumeResetsStatus()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        await using var factory = new DevControlStage7Factory(connectionString);
+        await factory.ResetDatabaseAsync();
+        using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
+        var (_, organization, project, environment) = await CreateTenantAsync(ownerClient);
+
+        var token = await PostJsonAsync<RegistrationTokenCreateDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/projects/{project.Id}/environments/{environment.Id}/registration-tokens",
+            new { name = "Production deploys" });
+
+        using var anonymousClient = factory.CreateClient();
+        using var registerRequest = new HttpRequestMessage(HttpMethod.Post, "/api/apps/register")
+        {
+            Content = JsonContent.Create(new
+            {
+                repo = "fullstack-nick/sample-app",
+                environment = environment.Slug,
+                serviceUrl = "https://sample.example.com",
+                healthUrl = "https://sample.example.com/health",
+                commitSha = "abcdef1234567890",
+                version = "v7",
+                imageDigest = "sha256:v7",
+                capabilities = new[] { "health", "deployment-events" }
+            })
+        };
+        registerRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Secret);
+        (await anonymousClient.SendAsync(registerRequest)).EnsureSuccessStatusCode();
+
+        var monitor = Assert.Single(await ownerClient.GetFromJsonAsync<List<MonitorDto>>($"/api/organizations/{organization.Id}/monitors") ?? []);
+        factory.Outbound.Enqueue(new SafeOutboundResponse(SafeOutboundResultKind.Completed, HttpStatusCode.InternalServerError, "down", false, 4, null, TimeSpan.FromMilliseconds(5)));
+        await RunSchedulerAsync(ownerClient);
+
+        var incidents = await ownerClient.GetFromJsonAsync<List<IncidentDto>>($"/api/organizations/{organization.Id}/incidents");
+        Assert.Equal("Investigating", Assert.Single(incidents!).Status);
+
+        (await PostJsonRawAsync(ownerClient, $"/api/organizations/{organization.Id}/monitors/{monitor.Id}/pause", new { })).EnsureSuccessStatusCode();
+        (await PostJsonRawAsync(ownerClient, $"/api/organizations/{organization.Id}/monitors/{monitor.Id}/resume", new { })).EnsureSuccessStatusCode();
+
+        await MakeMonitorDueAsync(factory, monitor.Id);
+        factory.Outbound.Enqueue(new SafeOutboundResponse(SafeOutboundResultKind.Completed, HttpStatusCode.OK, "ok", false, 2, null, TimeSpan.FromMilliseconds(4)));
+        await RunSchedulerAsync(ownerClient);
+
+        incidents = await ownerClient.GetFromJsonAsync<List<IncidentDto>>($"/api/organizations/{organization.Id}/incidents");
+        Assert.Equal("Resolved", Assert.Single(incidents!).Status);
+
+        var recoveredStatus = await ownerClient.GetFromJsonAsync<PublicStatusDto>("/api/public/status/acme-platform/sample-app?environment=production");
+        Assert.Equal("operational", recoveredStatus!.OverallStatus);
+    }
+
+    [Fact]
     public async Task ViewerCannotMutateMonitor_AndPrivateMonitorUrlIsRejected()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
