@@ -176,29 +176,6 @@ public static class GitHubEndpoints
             return Results.BadRequest(new ProblemDetailsResponse("Selected workflow was not found in the repository."));
         }
 
-        var file = await gitHubAppClient.GetFileContentAsync(input.Repo, installation.InstallationId, workflow.Path, repository.DefaultBranch, cancellationToken);
-        var serverUrl = AppRegistryEndpoints.BuildPublicBaseUrl(httpContext, configuration);
-        var audience = AppRegistryEndpoints.BuildRegistrationAudience(httpContext, configuration);
-        var setupActionReference = DevControlSetupActionReference.Normalize(configuration["SETUP_ACTION_REF"]);
-        var patch = GitHubWorkflowOnboardingPatchBuilder.Build(new GitHubWorkflowOnboardingRequest(
-            file.Content,
-            input.JobId,
-            serverUrl,
-            audience,
-            scope.Environment.Slug,
-            input.ServiceUrlExpression,
-            input.HealthUrlExpression,
-            input.VersionExpression,
-            input.ImageDigestExpression,
-            string.Join(",", input.Capabilities),
-            setupActionReference));
-        if (!patch.Succeeded)
-        {
-            return Results.BadRequest(new GitHubOnboardingValidationResponse(
-                [patch.Error ?? "Workflow could not be patched safely."],
-                BuildManualOidcSnippet(serverUrl, audience, scope.Environment.Slug, input, setupActionReference)));
-        }
-
         var connection = await dbContext.GitHubRepoConnections
             .SingleOrDefaultAsync(candidate =>
                     candidate.OrganizationId == organizationId &&
@@ -244,6 +221,30 @@ public static class GitHubEndpoints
                 input.ImageDigestExpression,
                 input.CapabilitiesJson,
                 now);
+        }
+
+        var file = await gitHubAppClient.GetFileContentAsync(input.Repo, installation.InstallationId, workflow.Path, repository.DefaultBranch, cancellationToken);
+        var serverUrl = AppRegistryEndpoints.BuildPublicBaseUrl(httpContext, configuration);
+        var audience = AppRegistryEndpoints.BuildRegistrationAudience(httpContext, configuration);
+        var setupActionReference = DevControlSetupActionReference.Normalize(configuration["SETUP_ACTION_REF"]);
+        var patch = GitHubWorkflowOnboardingPatchBuilder.Build(new GitHubWorkflowOnboardingRequest(
+            file.Content,
+            input.JobId,
+            serverUrl,
+            audience,
+            scope.Environment.Slug,
+            input.ServiceUrlExpression,
+            input.HealthUrlExpression,
+            input.VersionExpression,
+            input.ImageDigestExpression,
+            string.Join(",", input.Capabilities),
+            setupActionReference,
+            connection.Id));
+        if (!patch.Succeeded)
+        {
+            return Results.BadRequest(new GitHubOnboardingValidationResponse(
+                [patch.Error ?? "Workflow could not be patched safely."],
+                BuildManualOidcSnippet(serverUrl, audience, scope.Environment.Slug, input, setupActionReference)));
         }
 
         var environmentBranch = scope.Environment.Slug.Length > 12 ? scope.Environment.Slug[..12] : scope.Environment.Slug;

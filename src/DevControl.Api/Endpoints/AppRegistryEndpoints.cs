@@ -543,6 +543,7 @@ public static class AppRegistryEndpoints
         {
             return await ResolveGitHubOidcRegistrationContextAsync(
                 request.GitHubOidcToken!,
+                request.RepoConnectionId,
                 details,
                 httpContext,
                 dbContext,
@@ -602,6 +603,7 @@ public static class AppRegistryEndpoints
 
     private static async Task<RegistrationContextResult> ResolveGitHubOidcRegistrationContextAsync(
         string oidcToken,
+        string? repoConnectionIdValue,
         AppRegistrationDetails details,
         HttpContext httpContext,
         DevControlDbContext dbContext,
@@ -624,8 +626,20 @@ public static class AppRegistryEndpoints
             return RegistrationContextResult.Failed(Results.Unauthorized());
         }
 
-        var matches = await dbContext.GitHubRepoConnections
-            .Where(connection => connection.NormalizedRepo == details.NormalizedRepo)
+        var requestedRepoConnectionId = ParseOptionalGuid(repoConnectionIdValue);
+        if (!string.IsNullOrWhiteSpace(repoConnectionIdValue) && requestedRepoConnectionId is null)
+        {
+            return RegistrationContextResult.Failed(Results.BadRequest(new ProblemDetailsResponse("Repo connection id must be a valid GUID.")));
+        }
+
+        var query = dbContext.GitHubRepoConnections
+            .Where(connection => connection.NormalizedRepo == details.NormalizedRepo);
+        if (requestedRepoConnectionId is { } repoConnectionId)
+        {
+            query = query.Where(connection => connection.Id == repoConnectionId);
+        }
+
+        var matches = await query
             .Join(
                 dbContext.ProjectEnvironments.Where(environment => environment.Slug == details.Environment),
                 connection => connection.EnvironmentId,
@@ -636,7 +650,8 @@ public static class AppRegistryEndpoints
                 candidate => candidate.connection.ProjectId,
                 project => project.Id,
                 (candidate, project) => new { candidate.connection, candidate.environment, project })
-            .Take(2)
+            .OrderByDescending(candidate => candidate.connection.UpdatedAt)
+            .Take(10)
             .ToListAsync(cancellationToken);
 
         if (matches.Count == 0)
@@ -644,17 +659,20 @@ public static class AppRegistryEndpoints
             return RegistrationContextResult.Failed(Results.Unauthorized());
         }
 
-        if (matches.Count > 1)
-        {
-            return RegistrationContextResult.Failed(Results.Conflict(new ProblemDetailsResponse("GitHub OIDC registration matched multiple repo connections.")));
-        }
-
-        var match = matches[0];
-        if (!WorkflowRefMatches(claims.WorkflowRef, claims.Repository, match.connection.WorkflowPath))
+        var workflowMatches = matches
+            .Where(candidate => WorkflowRefMatches(claims.WorkflowRef, claims.Repository, candidate.connection.WorkflowPath))
+            .ToList();
+        if (workflowMatches.Count == 0)
         {
             return RegistrationContextResult.Failed(Results.Unauthorized());
         }
 
+        if (requestedRepoConnectionId is not null && workflowMatches.Count > 1)
+        {
+            return RegistrationContextResult.Failed(Results.Conflict(new ProblemDetailsResponse("GitHub OIDC registration matched multiple repo connections.")));
+        }
+
+        var match = workflowMatches[0];
         var runId = long.TryParse(claims.RunId, out var parsedRunId) ? parsedRunId : (long?)null;
         var runUrl = runId.HasValue ? $"https://github.com/{repo.FullName}/actions/runs/{runId.Value}" : string.Empty;
         return RegistrationContextResult.Success(new RegistrationContext(
@@ -667,6 +685,16 @@ public static class AppRegistryEndpoints
             match.connection,
             runId,
             runUrl));
+    }
+
+    private static Guid? ParseOptionalGuid(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return Guid.TryParse(value.Trim(), out var parsed) ? parsed : null;
     }
 
     private static bool WorkflowRefMatches(string workflowRef, string repository, string workflowPath)
@@ -729,6 +757,7 @@ public static class AppRegistryEndpoints
 public sealed record AppRegisterRequest(
     string? Repo,
     string? Environment,
+    string? RepoConnectionId,
     string? ServiceUrl,
     string? HealthUrl,
     string? CommitSha,

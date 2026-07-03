@@ -92,6 +92,38 @@ public sealed class GitHubStage8Tests
     }
 
     [Fact]
+    public void OnboardingPatch_IncludesRepoConnectionIdWhenProvided()
+    {
+        const string workflow = """
+                                name: Deploy
+                                on:
+                                  workflow_dispatch:
+                                jobs:
+                                  deploy:
+                                    runs-on: ubuntu-latest
+                                    steps:
+                                      - uses: actions/checkout@v4
+                                """;
+        var repoConnectionId = Guid.NewGuid();
+
+        var result = GitHubWorkflowOnboardingPatchBuilder.Build(new GitHubWorkflowOnboardingRequest(
+            workflow,
+            "deploy",
+            "https://devcontrol.example.com",
+            "https://devcontrol.example.com/api/apps/register",
+            "production",
+            "$SERVICE_URL",
+            "$SERVICE_URL/health",
+            "$REGISTER_VERSION",
+            "$REGISTER_IMAGE_DIGEST",
+            "health,deployment-events,deploy",
+            RepoConnectionId: repoConnectionId));
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Contains($"--repo-connection-id \"{repoConnectionId}\"", result.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OnboardingPatch_ReplacesUnmarkedExistingDevControlRegistrationStep()
     {
         const string workflow = """

@@ -14,7 +14,8 @@ public sealed record GitHubWorkflowOnboardingRequest(
     string VersionExpression,
     string ImageDigestExpression,
     string Capabilities,
-    string SetupActionReference = DevControlSetupActionReference.Default);
+    string SetupActionReference = DevControlSetupActionReference.Default,
+    Guid? RepoConnectionId = null);
 
 public sealed record GitHubWorkflowOnboardingResult(bool Succeeded, string Content, string? Error)
 {
@@ -338,6 +339,11 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         builder.AppendLine("          done");
         builder.AppendLine("          devcontrol apps register \\");
         builder.AppendLine($"            --environment {environmentSlug} \\");
+        if (request.RepoConnectionId is { } repoConnectionId)
+        {
+            builder.AppendLine($"            --repo-connection-id \"{repoConnectionId}\" \\");
+        }
+
         builder.AppendLine("            --service-url \"$DEVCONTROL_REGISTER_SERVICE_URL\" \\");
         builder.AppendLine("            --health-url \"$DEVCONTROL_REGISTER_HEALTH_URL\" \\");
         builder.AppendLine("            --repo \"${{ github.repository }}\" \\");

@@ -182,6 +182,7 @@ public sealed class CliRunner
         var payload = new AppRegisterPayload(
             options.Value("repo") ?? environment("GITHUB_REPOSITORY") ?? throw new CliUsageException("Repo is required. Use --repo or GITHUB_REPOSITORY."),
             options.Required("environment"),
+            options.Value("repo-connection-id"),
             options.Required("service-url"),
             options.Required("health-url"),
             options.Value("commit-sha") ?? environment("GITHUB_SHA") ?? throw new CliUsageException("Commit SHA is required. Use --commit-sha or GITHUB_SHA."),
@@ -318,7 +319,7 @@ public sealed class CliRunner
         output.WriteLine("  devcontrol config set --server <url> --token <token>");
         output.WriteLine("  devcontrol config show [--json]");
         output.WriteLine("  devcontrol config clear");
-        output.WriteLine("  devcontrol apps register --environment <slug> --service-url <url> --health-url <url> --version <version> --image-digest <digest> --capabilities <list> [--github-oidc-token <jwt>]");
+        output.WriteLine("  devcontrol apps register --environment <slug> --service-url <url> --health-url <url> --version <version> --image-digest <digest> --capabilities <list> [--repo-connection-id <id>] [--github-oidc-token <jwt>]");
         output.WriteLine("  devcontrol admin bootstrap-live-proof --owner-email <email>");
     }
 
@@ -345,6 +346,7 @@ public sealed class CliRunner
     private sealed record AppRegisterPayload(
         string Repo,
         string Environment,
+        string? RepoConnectionId,
         string ServiceUrl,
         string HealthUrl,
         string CommitSha,
