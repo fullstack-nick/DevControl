@@ -1691,7 +1691,7 @@ export default function App() {
     return (
       <main className="auth-screen">
         <section className="auth-panel">
-          <p className="eyebrow">DevControl Stage 2</p>
+          <p className="eyebrow">DevControl</p>
           <h1>Developer operations control plane</h1>
           <button className="primary" onClick={login}>Sign in</button>
         </section>
