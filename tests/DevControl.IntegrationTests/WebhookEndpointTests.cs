@@ -59,6 +59,10 @@ public sealed partial class WebhookEndpointTests
         Assert.Equal("webhook.test", request.Headers["X-DevControl-Event"]);
         Assert.StartsWith("sha256=", request.Headers["X-DevControl-Signature"], StringComparison.Ordinal);
 
+        var deliveryHistory = await ownerClient.GetFromJsonAsync<List<WebhookDeliveryDto>>($"/api/organizations/{organization.Id}/webhook-endpoints/{endpoint.Id}/deliveries");
+        Assert.NotNull(deliveryHistory);
+        Assert.Contains(deliveryHistory, delivery => delivery.Id == testDelivery.Id && delivery.Status == "Succeeded");
+
         _ = await PostJsonAsync<WebhookEndpointDto>(
             ownerClient,
             $"/api/organizations/{organization.Id}/webhook-endpoints/{endpoint.Id}/pause",

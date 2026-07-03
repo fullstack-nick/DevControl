@@ -300,7 +300,6 @@ public static class WebhookEndpoints
         }
 
         var deliveries = await QueryDeliveryResponses(dbContext, organizationId, endpointId, deliveryId: null)
-            .OrderByDescending(delivery => delivery.CreatedAt)
             .Take(50)
             .ToListAsync(cancellationToken);
 
@@ -582,6 +581,7 @@ public static class WebhookEndpoints
         }
 
         return deliveries
+            .OrderByDescending(delivery => delivery.CreatedAt)
             .Join(
                 dbContext.WebhookEvents,
                 delivery => delivery.WebhookEventId,
