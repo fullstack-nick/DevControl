@@ -339,6 +339,37 @@ label {
   min-width: 220px;
 }
 
+.action-result {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d8e0eb;
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.action-result strong {
+  color: #1f2a3d;
+}
+
+.action-result span {
+  color: #66758a;
+  font-size: 0.86rem;
+}
+
+.action-result.is-running {
+  border-left-color: #2f6fed;
+}
+
+.action-result.is-success {
+  border-left-color: #198754;
+}
+
+.action-result.is-failure {
+  border-left-color: #c93535;
+}
+
 .secret-box {
   display: grid;
   gap: 10px;

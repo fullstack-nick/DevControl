@@ -23,7 +23,7 @@ public sealed class GitHubSyncService(
         }
 
         var pullRequests = await SyncPullRequestsAsync(pullRequestBatchSize, cancellationToken);
-        var dispatches = await SyncWorkflowDispatchesAsync(dispatchBatchSize, cancellationToken);
+        var dispatches = await SyncWorkflowDispatchesAsync(dispatchBatchSize, null, cancellationToken);
         return new GitHubSyncResult(pullRequests, dispatches, pullRequestBatchSize, dispatchBatchSize);
     }
 
@@ -88,10 +88,22 @@ public sealed class GitHubSyncService(
         return updated;
     }
 
-    private async Task<int> SyncWorkflowDispatchesAsync(int batchSize, CancellationToken cancellationToken)
+    public async Task<int> SyncWorkflowDispatchesAsync(int batchSize, Guid? organizationId, CancellationToken cancellationToken)
     {
-        var dispatches = await dbContext.GitHubWorkflowDispatches
+        if (!gitHubAppClient.IsConfigured)
+        {
+            return 0;
+        }
+
+        var query = dbContext.GitHubWorkflowDispatches
             .Where(dispatch => dispatch.CompletedAt == null)
+            .AsQueryable();
+        if (organizationId.HasValue)
+        {
+            query = query.Where(dispatch => dispatch.OrganizationId == organizationId.Value);
+        }
+
+        var dispatches = await query
             .OrderBy(dispatch => dispatch.UpdatedAt)
             .Take(batchSize)
             .ToListAsync(cancellationToken);

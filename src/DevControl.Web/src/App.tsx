@@ -550,6 +550,42 @@ function shortSha(value: string) {
   return value.length > 12 ? value.slice(0, 12) : value;
 }
 
+function isWorkflowDispatchActive(dispatch: GitHubWorkflowDispatch) {
+  return dispatch.controlActionStatus === "InProgress" && !dispatch.completedAt;
+}
+
+function workflowDispatchResultLabel(dispatch: GitHubWorkflowDispatch) {
+  if (dispatch.controlActionStatus === "InProgress") {
+    return dispatch.gitHubRunId ? "Running" : "Dispatched";
+  }
+
+  if (dispatch.controlActionStatus === "TimedOut") {
+    return "Timed out";
+  }
+
+  return dispatch.controlActionStatus;
+}
+
+function workflowDispatchDetail(dispatch: GitHubWorkflowDispatch) {
+  const gitHubState = dispatch.status
+    ? `${dispatch.status}${dispatch.conclusion ? ` / ${dispatch.conclusion}` : ""}`
+    : "Waiting for GitHub run";
+  const completed = dispatch.completedAt ? ` / completed ${formatDate(dispatch.completedAt)}` : "";
+  return `${gitHubState} / requested ${formatDate(dispatch.requestedAt)}${completed}`;
+}
+
+function workflowDispatchResultClass(dispatch: GitHubWorkflowDispatch) {
+  if (dispatch.controlActionStatus === "Succeeded") {
+    return "is-success";
+  }
+
+  if (dispatch.controlActionStatus === "Failed" || dispatch.controlActionStatus === "TimedOut") {
+    return "is-failure";
+  }
+
+  return "is-running";
+}
+
 function formatLatency(value: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ms`;
 }
@@ -695,6 +731,18 @@ export default function App() {
 
     return selectedProjectId ? app.projectId === selectedProjectId : true;
   });
+  const latestGitHubDispatchByLiveApp = useMemo(() => {
+    const latest = new Map<string, GitHubWorkflowDispatch>();
+    for (const dispatch of gitHubWorkflowDispatches) {
+      const current = latest.get(dispatch.liveAppId);
+      if (!current || Date.parse(dispatch.requestedAt) > Date.parse(current.requestedAt)) {
+        latest.set(dispatch.liveAppId, dispatch);
+      }
+    }
+
+    return latest;
+  }, [gitHubWorkflowDispatches]);
+  const activeGitHubWorkflowDispatchCount = gitHubWorkflowDispatches.filter(isWorkflowDispatchActive).length;
   const filteredApiKeys = apiKeys.filter((apiKey) => {
     if (selectedEnvironmentId) {
       return apiKey.environmentId === selectedEnvironmentId;
@@ -960,6 +1008,25 @@ export default function App() {
       });
     }
   }, [authenticated, selectedOrgId, me?.organizations]);
+
+  useEffect(() => {
+    if (!authenticated || !selectedOrgId || !canReadControlActions || activeGitHubWorkflowDispatchCount === 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void api<GitHubWorkflowDispatch[]>(`/api/organizations/${selectedOrgId}/github/workflow-dispatches/sync`, { method: "POST" })
+        .then((dispatches) => {
+          setGitHubWorkflowDispatches(dispatches);
+          return refreshOrgData(selectedOrgId);
+        })
+        .catch((refreshError: unknown) => {
+          setError(refreshError instanceof Error ? refreshError.message : "Failed to sync GitHub workflow dispatches.");
+        });
+    }, 10000);
+
+    return () => window.clearInterval(timer);
+  }, [authenticated, selectedOrgId, canReadControlActions, activeGitHubWorkflowDispatchCount]);
 
   useEffect(() => {
     if (authenticated && selectedOrgId && selectedProjectId) {
@@ -1824,45 +1891,55 @@ export default function App() {
               </div>
               <div className="stack">
                 {filteredLiveApps.length === 0 ? <p className="empty">No live apps registered</p> : null}
-                {filteredLiveApps.map((app) => (
-                  <div className="list-item app-item" key={app.id}>
-                    <div>
-                      <strong>{app.repo}</strong>
-                      <span>{app.projectName} / {app.environmentName}</span>
-                      <span>{app.version} / {shortSha(app.currentCommitSha)}</span>
-                      <span>{app.imageDigest}</span>
-                      <span>{app.capabilities.join(", ")}</span>
-                      {app.gitHubRunUrl ? <a href={app.gitHubRunUrl} target="_blank" rel="noreferrer">Last GitHub run</a> : null}
-                      <span>Registered {formatDate(app.lastRegisteredAt)}</span>
-                    </div>
-                    <div className="actions">
-                      <a href={app.serviceUrl} target="_blank" rel="noreferrer">Service</a>
-                      <a href={app.healthUrl} target="_blank" rel="noreferrer">Health</a>
-                      {canManageOrg && app.capabilities.some((capability) => ["deploy", "redeploy", "rollback"].includes(capability)) && (
-                        <div className="live-control">
-                          <input placeholder="Action reason" value={appActionReasons[app.id] ?? ""} onChange={(event) => setAppActionReasons({ ...appActionReasons, [app.id]: event.target.value })} />
-                          <div className="actions">
-                            {app.capabilities.includes("deploy") && <button onClick={() => dispatchLiveAppAction(app, "deploy")} disabled={busy}>Deploy</button>}
-                            {app.capabilities.includes("redeploy") && <button onClick={() => dispatchLiveAppAction(app, "redeploy")} disabled={busy}>Redeploy</button>}
-                            {app.capabilities.includes("rollback") && <button onClick={() => loadAppDeployments(app)} disabled={busy}>History</button>}
-                          </div>
-                          {app.capabilities.includes("rollback") && liveAppDeployments[app.id]?.length ? (
-                            <div className="rollback-row">
-                              <select value={rollbackTargets[app.id] ?? ""} onChange={(event) => setRollbackTargets({ ...rollbackTargets, [app.id]: event.target.value })}>
-                                {liveAppDeployments[app.id].map((deployment) => (
-                                  <option value={deployment.id} key={deployment.id}>
-                                    {deployment.version} / {shortSha(deployment.commitSha)} / {formatDate(deployment.registeredAt)}
-                                  </option>
-                                ))}
-                              </select>
-                              <button onClick={() => dispatchLiveAppAction(app, "rollback")} disabled={busy || !rollbackTargets[app.id]}>Rollback</button>
+                {filteredLiveApps.map((app) => {
+                  const latestDispatch = latestGitHubDispatchByLiveApp.get(app.id);
+                  return (
+                    <div className="list-item app-item" key={app.id}>
+                      <div>
+                        <strong>{app.repo}</strong>
+                        <span>{app.projectName} / {app.environmentName}</span>
+                        <span>{app.version} / {shortSha(app.currentCommitSha)}</span>
+                        <span>{app.imageDigest}</span>
+                        <span>{app.capabilities.join(", ")}</span>
+                        {app.gitHubRunUrl ? <a href={app.gitHubRunUrl} target="_blank" rel="noreferrer">Last GitHub run</a> : null}
+                        <span>Registered {formatDate(app.lastRegisteredAt)}</span>
+                      </div>
+                      <div className="actions">
+                        <a href={app.serviceUrl} target="_blank" rel="noreferrer">Service</a>
+                        <a href={app.healthUrl} target="_blank" rel="noreferrer">Health</a>
+                        {canManageOrg && app.capabilities.some((capability) => ["deploy", "redeploy", "rollback"].includes(capability)) && (
+                          <div className="live-control">
+                            <input placeholder="Action reason" value={appActionReasons[app.id] ?? ""} onChange={(event) => setAppActionReasons({ ...appActionReasons, [app.id]: event.target.value })} />
+                            <div className="actions">
+                              {app.capabilities.includes("deploy") && <button onClick={() => dispatchLiveAppAction(app, "deploy")} disabled={busy}>Deploy</button>}
+                              {app.capabilities.includes("redeploy") && <button onClick={() => dispatchLiveAppAction(app, "redeploy")} disabled={busy}>Redeploy</button>}
+                              {app.capabilities.includes("rollback") && <button onClick={() => loadAppDeployments(app)} disabled={busy}>History</button>}
                             </div>
-                          ) : null}
-                        </div>
-                      )}
+                            {app.capabilities.includes("rollback") && liveAppDeployments[app.id]?.length ? (
+                              <div className="rollback-row">
+                                <select value={rollbackTargets[app.id] ?? ""} onChange={(event) => setRollbackTargets({ ...rollbackTargets, [app.id]: event.target.value })}>
+                                  {liveAppDeployments[app.id].map((deployment) => (
+                                    <option value={deployment.id} key={deployment.id}>
+                                      {deployment.version} / {shortSha(deployment.commitSha)} / {formatDate(deployment.registeredAt)}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button onClick={() => dispatchLiveAppAction(app, "rollback")} disabled={busy || !rollbackTargets[app.id]}>Rollback</button>
+                              </div>
+                            ) : null}
+                            {latestDispatch ? (
+                              <div className={`action-result ${workflowDispatchResultClass(latestDispatch)}`}>
+                                <strong>Latest action: {latestDispatch.action} / {workflowDispatchResultLabel(latestDispatch)}</strong>
+                                <span>{workflowDispatchDetail(latestDispatch)}</span>
+                                {latestDispatch.runUrl ? <a href={latestDispatch.runUrl} target="_blank" rel="noreferrer">Run</a> : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -1927,10 +2004,10 @@ export default function App() {
                   {filteredGitHubWorkflowDispatches.map((dispatch) => (
                     <div className="table-row github-dispatch-row" key={dispatch.id}>
                       <div>
-                        <strong>{dispatch.action} / {dispatch.controlActionStatus}</strong>
+                        <strong>{dispatch.action} / {workflowDispatchResultLabel(dispatch)}</strong>
                         <span>{dispatch.repo}</span>
                         <span>{dispatch.workflowPath} @ {dispatch.ref}</span>
-                        <span>{dispatch.status}{dispatch.conclusion ? ` / ${dispatch.conclusion}` : ""}</span>
+                        <span>{workflowDispatchDetail(dispatch)}</span>
                       </div>
                       <span>{formatDate(dispatch.requestedAt)}</span>
                       {dispatch.runUrl ? <a href={dispatch.runUrl} target="_blank" rel="noreferrer">Run</a> : <span>-</span>}

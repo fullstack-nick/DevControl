@@ -211,11 +211,27 @@ public sealed partial class GitHubEndpointTests
 
         Assert.Equal($"https://github.com/{FakeGitHubAppClient.Repo}/actions/workflows/deploy.yml", accepted.RunUrl);
 
+        fakeGitHub.WorkflowRunToFind = new GitHubWorkflowRunInfo(
+            123456789,
+            $"https://github.com/{FakeGitHubAppClient.Repo}/actions/runs/123456789",
+            "completed",
+            "success",
+            DateTimeOffset.UtcNow);
+        var synced = await PostJsonAsync<List<WorkflowDispatchDto>>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/github/workflow-dispatches/sync",
+            new { });
+        var syncedDispatch = synced.Single();
+        Assert.Equal("Succeeded", syncedDispatch.ControlActionStatus);
+        Assert.Equal("completed", syncedDispatch.Status);
+        Assert.Equal("success", syncedDispatch.Conclusion);
+        Assert.Equal($"https://github.com/{FakeGitHubAppClient.Repo}/actions/runs/123456789", syncedDispatch.RunUrl);
+
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DevControlDbContext>();
         var dispatch = await dbContext.GitHubWorkflowDispatches.SingleAsync();
-        Assert.Null(dispatch.GitHubRunId);
-        Assert.Equal($"https://github.com/{FakeGitHubAppClient.Repo}/actions/workflows/deploy.yml", dispatch.RunUrl);
+        Assert.Equal(123456789, dispatch.GitHubRunId);
+        Assert.Equal($"https://github.com/{FakeGitHubAppClient.Repo}/actions/runs/123456789", dispatch.RunUrl);
     }
 
     private static object OnboardingPayload(Guid projectId, Guid environmentId)
@@ -381,6 +397,8 @@ public sealed partial class GitHubEndpointTests
 
         public GitHubWorkflowDispatchInfo DispatchInfo { get; init; } = new(987654321, $"https://github.com/{Repo}/actions/runs/987654321");
 
+        public GitHubWorkflowRunInfo? WorkflowRunToFind { get; set; }
+
         public Task<GitHubInstallationInfo?> GetRepositoryInstallationAsync(GitHubRepoName repo, CancellationToken cancellationToken)
         {
             return Task.FromResult<GitHubInstallationInfo?>(new GitHubInstallationInfo(123, "fullstack-nick", "User", "selected", "{}"));
@@ -452,7 +470,7 @@ public sealed partial class GitHubEndpointTests
 
         public Task<GitHubWorkflowRunInfo?> FindWorkflowRunAsync(GitHubRepoName repo, long installationId, string workflowPath, string gitRef, DateTimeOffset requestedAt, CancellationToken cancellationToken)
         {
-            return Task.FromResult<GitHubWorkflowRunInfo?>(null);
+            return Task.FromResult(WorkflowRunToFind);
         }
     }
 
@@ -517,5 +535,5 @@ public sealed partial class GitHubEndpointTests
 
     private sealed record LiveAppDto(Guid Id);
 
-    private sealed record WorkflowDispatchDto(Guid Id, string RunUrl);
+    private sealed record WorkflowDispatchDto(Guid Id, string ControlActionStatus, string RunUrl, string Status, string Conclusion);
 }

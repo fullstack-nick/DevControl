@@ -24,6 +24,7 @@ public static class GitHubEndpoints
         api.MapPost("/organizations/{organizationId:guid}/github/onboarding-prs", CreateOnboardingPullRequestAsync).RequireCsrf();
         api.MapPost("/organizations/{organizationId:guid}/github/onboarding-prs/{pullRequestId:guid}/sync", SyncOnboardingPullRequestAsync).RequireCsrf();
         api.MapGet("/organizations/{organizationId:guid}/github/workflow-dispatches", ListWorkflowDispatchesAsync);
+        api.MapPost("/organizations/{organizationId:guid}/github/workflow-dispatches/sync", SyncWorkflowDispatchesAsync).RequireCsrf();
 
         api.MapPost("/organizations/{organizationId:guid}/apps/{liveAppId:guid}/actions/deploy", DispatchDeployAsync).RequireCsrf();
         api.MapPost("/organizations/{organizationId:guid}/apps/{liveAppId:guid}/actions/redeploy", DispatchRedeployAsync).RequireCsrf();
@@ -376,6 +377,29 @@ public static class GitHubEndpoints
             .Take(50)
             .ToListAsync(cancellationToken);
         return Results.Ok(dispatches.Select(candidate => ToWorkflowDispatchResponse(candidate.dispatch, candidate.liveApp, candidate.controlAction)));
+    }
+
+    private static async Task<IResult> SyncWorkflowDispatchesAsync(
+        Guid organizationId,
+        CurrentUserAccessor currentUserAccessor,
+        TenantAccessService tenantAccess,
+        GitHubSyncService gitHubSyncService,
+        DevControlDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var actor = await currentUserAccessor.GetOrCreateAsync(cancellationToken);
+        var access = await tenantAccess.RequireAsync(organizationId, actor, OrganizationRole.Developer, cancellationToken);
+        var failure = AccessFailure(access);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        await gitHubSyncService.SyncWorkflowDispatchesAsync(10, organizationId, cancellationToken);
+        var dispatches = await QueryWorkflowDispatches(dbContext, organizationId)
+            .Take(50)
+            .ToListAsync(cancellationToken);
+        return Results.Ok(dispatches);
     }
 
     private static Task<IResult> DispatchDeployAsync(
