@@ -47,6 +47,9 @@ public sealed class GitHubStage8Tests
         Assert.Contains("id-token: write", result.Content, StringComparison.Ordinal);
         Assert.Contains("# DEVCONTROL-REGISTRATION-START", result.Content, StringComparison.Ordinal);
         Assert.Contains("devcontrol apps register", result.Content, StringComparison.Ordinal);
+        Assert.Contains("DEVCONTROL_REGISTER_SERVICE_URL=\"${{ steps.deploy.outputs.service-url }}\"", result.Content, StringComparison.Ordinal);
+        Assert.Contains("for name in DEVCONTROL_REGISTER_SERVICE_URL DEVCONTROL_REGISTER_HEALTH_URL DEVCONTROL_REGISTER_VERSION DEVCONTROL_REGISTER_IMAGE_DIGEST", result.Content, StringComparison.Ordinal);
+        Assert.Contains("--service-url \"$DEVCONTROL_REGISTER_SERVICE_URL\"", result.Content, StringComparison.Ordinal);
         Assert.Contains("--github-oidc-token \"$DEVCONTROL_GITHUB_OIDC_TOKEN\"", result.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("const core = require('@actions/core')", result.Content, StringComparison.Ordinal);
     }

@@ -298,6 +298,10 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         var audience = EscapeShell(request.Audience);
         var environmentSlug = EscapeShell(request.EnvironmentSlug);
         var capabilities = EscapeShell(request.Capabilities);
+        var serviceUrlExpression = EscapeBashDoubleQuoted(request.ServiceUrlExpression);
+        var healthUrlExpression = EscapeBashDoubleQuoted(request.HealthUrlExpression);
+        var versionExpression = EscapeBashDoubleQuoted(request.VersionExpression);
+        var imageDigestExpression = EscapeBashDoubleQuoted(request.ImageDigestExpression);
 
         var builder = new StringBuilder();
         builder.AppendLine($"      {StartMarker}");
@@ -322,14 +326,24 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
         builder.AppendLine($"          DEVCONTROL_SERVER: {serverUrl}");
         builder.AppendLine("          DEVCONTROL_GITHUB_OIDC_TOKEN: ${{ steps.devcontrol_oidc.outputs.token }}");
         builder.AppendLine("        run: |");
+        builder.AppendLine($"          DEVCONTROL_REGISTER_SERVICE_URL=\"{serviceUrlExpression}\"");
+        builder.AppendLine($"          DEVCONTROL_REGISTER_HEALTH_URL=\"{healthUrlExpression}\"");
+        builder.AppendLine($"          DEVCONTROL_REGISTER_VERSION=\"{versionExpression}\"");
+        builder.AppendLine($"          DEVCONTROL_REGISTER_IMAGE_DIGEST=\"{imageDigestExpression}\"");
+        builder.AppendLine("          for name in DEVCONTROL_REGISTER_SERVICE_URL DEVCONTROL_REGISTER_HEALTH_URL DEVCONTROL_REGISTER_VERSION DEVCONTROL_REGISTER_IMAGE_DIGEST; do");
+        builder.AppendLine("            if [ -z \"${!name}\" ]; then");
+        builder.AppendLine("              echo \"::error::$name is empty. Update the DevControl onboarding expression to a literal, workflow output, or shell variable produced earlier in this job.\"");
+        builder.AppendLine("              exit 1");
+        builder.AppendLine("            fi");
+        builder.AppendLine("          done");
         builder.AppendLine("          devcontrol apps register \\");
         builder.AppendLine($"            --environment {environmentSlug} \\");
-        builder.AppendLine($"            --service-url \"{request.ServiceUrlExpression}\" \\");
-        builder.AppendLine($"            --health-url \"{request.HealthUrlExpression}\" \\");
+        builder.AppendLine("            --service-url \"$DEVCONTROL_REGISTER_SERVICE_URL\" \\");
+        builder.AppendLine("            --health-url \"$DEVCONTROL_REGISTER_HEALTH_URL\" \\");
         builder.AppendLine("            --repo \"${{ github.repository }}\" \\");
         builder.AppendLine("            --commit-sha \"${{ github.sha }}\" \\");
-        builder.AppendLine($"            --version \"{request.VersionExpression}\" \\");
-        builder.AppendLine($"            --image-digest \"{request.ImageDigestExpression}\" \\");
+        builder.AppendLine("            --version \"$DEVCONTROL_REGISTER_VERSION\" \\");
+        builder.AppendLine("            --image-digest \"$DEVCONTROL_REGISTER_IMAGE_DIGEST\" \\");
         builder.AppendLine($"            --capabilities {capabilities} \\");
         builder.AppendLine("            --github-oidc-token \"$DEVCONTROL_GITHUB_OIDC_TOKEN\" \\");
         builder.AppendLine("            --json");
@@ -340,6 +354,16 @@ public static partial class GitHubWorkflowOnboardingPatchBuilder
     private static string EscapeShell(string value)
     {
         return value.Replace("'", "'\"'\"'", StringComparison.Ordinal);
+    }
+
+    private static string EscapeBashDoubleQuoted(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("`", "\\`", StringComparison.Ordinal)
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal);
     }
 
     [GeneratedRegex("^  [A-Za-z0-9_.-]+:\\s*$")]

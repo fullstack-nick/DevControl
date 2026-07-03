@@ -621,10 +621,10 @@ export default function App() {
     repo: "",
     workflowPath: "",
     jobId: "deploy",
-    serviceUrlExpression: "${{ steps.deploy.outputs.service-url }}",
-    healthUrlExpression: "${{ steps.deploy.outputs.health-url }}",
-    versionExpression: "${{ github.sha }}",
-    imageDigestExpression: "${{ steps.deploy.outputs.image-digest }}",
+    serviceUrlExpression: "$SERVICE_URL",
+    healthUrlExpression: "$SERVICE_URL/health",
+    versionExpression: "$REGISTER_VERSION",
+    imageDigestExpression: "$REGISTER_IMAGE_DIGEST",
     capabilities: "health,deployment-events,deploy,redeploy,rollback"
   });
   const [appActionReasons, setAppActionReasons] = useState<Record<string, string>>({});
@@ -1884,6 +1884,7 @@ export default function App() {
                 )}
                 {selectedEnvironment && (
                   <form className="inline-form github-onboarding-form" onSubmit={createGitHubOnboardingPullRequest}>
+                    <p className="form-help">Use literals, GitHub expressions, or shell variables that exist before the registration step. The defaults match workflows that set SERVICE_URL, REGISTER_VERSION, and REGISTER_IMAGE_DIGEST earlier in the job.</p>
                     <select required value={gitHubForm.workflowPath} onChange={(event) => setGitHubForm({ ...gitHubForm, workflowPath: event.target.value })}>
                       <option value="">Workflow</option>
                       {gitHubResolution?.workflows.map((workflow) => (

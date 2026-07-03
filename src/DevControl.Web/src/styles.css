@@ -385,6 +385,13 @@ label {
   align-items: start;
 }
 
+.form-help {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #536173;
+  font-size: 0.86rem;
+}
+
 .table-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 160px auto;
