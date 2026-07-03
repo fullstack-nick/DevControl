@@ -1,8 +1,3 @@
-output "operator_google_account" {
-  value       = var.operator_google_account
-  description = "The required human Google account for local GCP changes."
-}
-
 output "region" {
   value = var.region
 }

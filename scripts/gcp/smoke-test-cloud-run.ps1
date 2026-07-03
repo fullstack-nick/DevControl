@@ -1,6 +1,6 @@
 param(
   [string]$ServiceUrl,
-  [string]$RequiredAccount = "nickaccturk@gmail.com"
+  [string]$RequiredAccount = $env:DEVCONTROL_GCP_REQUIRED_ACCOUNT
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,4 +24,3 @@ if ($ready.StatusCode -ne 200) {
 }
 
 Write-Host "Cloud Run smoke test passed for $baseUrl."
-

@@ -1,8 +1,12 @@
 param(
-  [string]$RequiredAccount = "nickaccturk@gmail.com"
+  [string]$RequiredAccount = $env:DEVCONTROL_GCP_REQUIRED_ACCOUNT
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($RequiredAccount)) {
+  throw "Set DEVCONTROL_GCP_REQUIRED_ACCOUNT or pass -RequiredAccount before running GCP scripts."
+}
 
 $gcloud = & "$PSScriptRoot\resolve-gcloud.ps1"
 

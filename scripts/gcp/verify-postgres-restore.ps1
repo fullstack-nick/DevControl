@@ -1,6 +1,6 @@
 param(
   [string]$ProjectId = $env:DEVCONTROL_GCP_PROJECT_ID,
-  [string]$RequiredAccount = "nickaccturk@gmail.com",
+  [string]$RequiredAccount = $env:DEVCONTROL_GCP_REQUIRED_ACCOUNT,
   [string]$Zone = "us-central1-a",
   [string]$InstanceName = "devcontrol-postgres",
   [string]$Network = "devcontrol-vpc",

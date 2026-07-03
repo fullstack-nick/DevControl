@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: devcontrol
       POSTGRES_USER: devcontrol
-      POSTGRES_PASSWORD: devcontrol_dev_password
+      POSTGRES_PASSWORD: ${DEVCONTROL_POSTGRES_PASSWORD:-devcontrol_dev_password}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devcontrol -d devcontrol"]
       interval: 5s
@@ -27,9 +27,9 @@ services:
       DEVCONTROL_POSTGRES_PORT: "5432"
       DEVCONTROL_POSTGRES_DATABASE: devcontrol
       DEVCONTROL_POSTGRES_USERNAME: devcontrol
-      DEVCONTROL_POSTGRES_PASSWORD: devcontrol_dev_password
+      DEVCONTROL_POSTGRES_PASSWORD: ${DEVCONTROL_POSTGRES_PASSWORD:-devcontrol_dev_password}
       DEVCONTROL_RUN_MIGRATIONS_ON_STARTUP: "true"
-      DEVCONTROL_SCHEDULER_SECRET: devcontrol_local_scheduler_secret
+      DEVCONTROL_SCHEDULER_SECRET: ${DEVCONTROL_SCHEDULER_SECRET:-devcontrol_local_scheduler_secret}
       DEVCONTROL_METRICS_ENABLED: "true"
       DEVCONTROL_RETENTION_RATE_LIMIT_WINDOWS_DAYS: "14"
       DEVCONTROL_RETENTION_MONITOR_CHECKS_DAYS: "30"
@@ -61,7 +61,7 @@ services:
     profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${DEVCONTROL_GRAFANA_ADMIN_PASSWORD:-admin}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/devcontrol-stage-9.json

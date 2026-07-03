@@ -1,6 +1,6 @@
 param(
   [string]$ProjectId = $env:DEVCONTROL_GCP_PROJECT_ID,
-  [string]$RequiredAccount = "nickaccturk@gmail.com",
+  [string]$RequiredAccount = $env:DEVCONTROL_GCP_REQUIRED_ACCOUNT,
   [string]$GithubOwner = $env:DEVCONTROL_GITHUB_OWNER,
   [string]$GithubRepo = $env:DEVCONTROL_GITHUB_REPO,
   [string]$Region = "us-central1",

@@ -17,10 +17,9 @@ deployed runtime facts back to DevControl with a scoped registration token.
 The token is shown once. Store it as a GitHub Actions secret named
 `DEVCONTROL_TOKEN`.
 
-For private repositories, the generated snippet installs the CLI through the
-private `fullstack-nick/DevControl/.github/actions/setup-devcontrol@main`
-action. The DevControl repository must allow private Actions access for repos
-that consume that action.
+The generated snippet installs the CLI through the setup action in this repo.
+Set `DEVCONTROL_SETUP_ACTION_REF` if your deployment uses a fork or a pinned
+release branch.
 
 ## CLI registration
 

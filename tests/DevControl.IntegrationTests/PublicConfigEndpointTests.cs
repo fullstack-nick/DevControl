@@ -25,7 +25,7 @@ public sealed class PublicConfigEndpointTests
         await using var factory = new DevControlPublicConfigFactory(null);
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/public/config");
-        request.Headers.Host = "devcontrol-nictbzfhga-uc.a.run.app";
+        request.Headers.Host = "devcontrol-example-uc.a.run.app";
 
         var response = await client.SendAsync(request);
         var config = await response.Content.ReadFromJsonAsync<PublicConfigDto>();

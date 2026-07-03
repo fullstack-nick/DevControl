@@ -170,13 +170,14 @@ objects after 7 days.
 Create a backup:
 
 ```powershell
-$env:DEVCONTROL_GCP_PROJECT_ID = "devcontrol-r7m5o9ld"
+$env:DEVCONTROL_GCP_PROJECT_ID = "<gcp-project-id>"
+$env:DEVCONTROL_GCP_REQUIRED_ACCOUNT = "<operator-google-account>"
 .\scripts\gcp\backup-postgres.ps1
 ```
 
 The script:
 
-1. verifies the active Google account is `nickaccturk@gmail.com`,
+1. verifies the active Google account is the configured operator account,
 2. opens a temporary SSH firewall rule for the operator's current `/32`,
 3. runs `pg_dump -Fc` on the PostgreSQL VM,
 4. downloads the dump into `.artifacts/backups`,

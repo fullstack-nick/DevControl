@@ -66,11 +66,11 @@ jobs:
           TF_VAR_auth_google_client_secret: ${{ secrets.DEVCONTROL_AUTH_GOOGLE_CLIENT_SECRET }}
           TF_VAR_github_app_id: ${{ vars.DEVCONTROL_GITHUB_APP_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.DEVCONTROL_GITHUB_APP_PRIVATE_KEY }}
+          TF_VAR_operator_google_account: ${{ secrets.DEVCONTROL_GCP_OPERATOR_ACCOUNT }}
           TF_VAR_operator_bootstrap_secret: ${{ secrets.DEVCONTROL_OPERATOR_BOOTSTRAP_SECRET }}
           TF_VAR_smtp_password: ${{ secrets.DEVCONTROL_SMTP_PASSWORD }}
         run: |
           terraform plan \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var "github_owner=${{ github.repository_owner }}" \
-            -var "github_repo=${{ github.event.repository.name }}" \
-            -var "operator_google_account=nickaccturk@gmail.com"
+            -var "github_repo=${{ github.event.repository.name }}"

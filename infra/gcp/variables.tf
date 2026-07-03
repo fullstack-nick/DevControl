@@ -4,13 +4,12 @@ variable "project_id" {
 }
 
 variable "operator_google_account" {
-  description = "The only user account allowed to bootstrap or mutate DevControl GCP resources locally."
+  description = "The human Google account allowed to bootstrap or mutate DevControl GCP resources locally. Supply through TF_VAR_operator_google_account."
   type        = string
-  default     = "nickaccturk@gmail.com"
 
   validation {
-    condition     = var.operator_google_account == "nickaccturk@gmail.com"
-    error_message = "DevControl GCP operations must use nickaccturk@gmail.com."
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.operator_google_account))
+    error_message = "operator_google_account must be a valid email address."
   }
 }
 

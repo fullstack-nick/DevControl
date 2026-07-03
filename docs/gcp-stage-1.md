@@ -19,12 +19,13 @@ Pick a globally unique project ID, then run:
 
 ```powershell
 $env:DEVCONTROL_GCP_PROJECT_ID = "your-unique-devcontrol-project-id"
+$env:DEVCONTROL_GCP_REQUIRED_ACCOUNT = "<operator-google-account>"
 .\scripts\gcp\bootstrap-project.ps1
 ```
 
-The script logs in as `nickaccturk@gmail.com` if needed, asserts that it is the
-active account, creates the project, asks for a billing account, links billing,
-and enables required APIs.
+The script logs in as the configured operator account if needed, asserts that
+it is the active account, creates the project, asks for a billing account, links
+billing, and enables required APIs.
 
 ## Provision Infrastructure
 
@@ -32,6 +33,7 @@ Set the GitHub owner/repo that will run Actions:
 
 ```powershell
 $env:DEVCONTROL_GCP_PROJECT_ID = "your-unique-devcontrol-project-id"
+$env:DEVCONTROL_GCP_REQUIRED_ACCOUNT = "<operator-google-account>"
 $env:DEVCONTROL_GITHUB_OWNER = "your-github-owner"
 $env:DEVCONTROL_GITHUB_REPO = "DevControl"
 .\scripts\gcp\terraform-plan.ps1
@@ -70,4 +72,3 @@ Expected results:
 - `/health/live` returns 200.
 - `/health/ready` returns 200 only when Cloud Run reaches PostgreSQL through the
   private VPC path.
-

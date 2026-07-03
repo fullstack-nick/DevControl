@@ -14,14 +14,14 @@ public sealed class CliRunnerTests
         var output = new StringWriter();
         var error = new StringWriter();
         var store = new CliConfigurationStore(configPath);
-        await store.SaveAsync(new CliConfiguration("https://devcontrol.example.com", "dcr_super_secret_token"));
+        await store.SaveAsync(new CliConfiguration("https://devcontrol.example.com", "test_registration_token_placeholder"));
 
         var runner = new CliRunner(new HttpClient(new RecordingHandler()), store, output, error, _ => null);
 
         var exitCode = await runner.RunAsync(["config", "show", "--json"]);
 
         Assert.Equal(0, exitCode);
-        Assert.DoesNotContain("super_secret", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("registration_token", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("\"hasToken\": true", output.ToString(), StringComparison.Ordinal);
         File.Delete(configPath);
     }

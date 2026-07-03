@@ -1,7 +1,6 @@
 locals {
-  app_name       = "devcontrol"
-  operator_label = "nickaccturk-gmail-com"
-  github_repo    = "${var.github_owner}/${var.github_repo}"
+  app_name    = "devcontrol"
+  github_repo = "${var.github_owner}/${var.github_repo}"
   github_allowed_repositories = toset(length(var.github_allowed_repositories) > 0
     ? var.github_allowed_repositories
     : [
@@ -13,9 +12,8 @@ locals {
   ])
 
   labels = {
-    app      = local.app_name
-    stage    = "stage-2"
-    operator = local.operator_label
+    app   = local.app_name
+    stage = "production"
   }
 
   required_services = toset([
