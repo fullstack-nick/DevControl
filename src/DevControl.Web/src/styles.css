@@ -423,6 +423,17 @@ label {
   font-size: 0.86rem;
 }
 
+.action-help {
+  max-width: 420px;
+}
+
+.inline-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .table-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 160px auto;

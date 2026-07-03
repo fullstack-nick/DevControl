@@ -664,6 +664,7 @@ export default function App() {
     capabilities: "health,deployment-events,deploy,redeploy,rollback"
   });
   const [appActionReasons, setAppActionReasons] = useState<Record<string, string>>({});
+  const [appActionErrors, setAppActionErrors] = useState<Record<string, string>>({});
   const [rollbackTargets, setRollbackTargets] = useState<Record<string, string>>({});
   const [apiKeyForm, setApiKeyForm] = useState({ name: "", scope: "sample:read", rateLimitPerMinute: "10" });
   const [flagForm, setFlagForm] = useState({ key: "", name: "", description: "", kind: "FeatureFlag", enabled: false, reason: "" });
@@ -1286,8 +1287,13 @@ export default function App() {
       return;
     }
 
+    const reason = (appActionReasons[app.id] ?? "").trim();
+    if (!reason) {
+      setAppActionErrors((current) => ({ ...current, [app.id]: "Enter an action reason before running live control." }));
+      return;
+    }
+
     await runMutation(async () => {
-      const reason = appActionReasons[app.id] ?? "";
       const targetDeploymentId = action === "rollback" ? rollbackTargets[app.id] || undefined : undefined;
       const dispatch = await api<GitHubWorkflowDispatch>(`/api/organizations/${selectedOrgId}/apps/${app.id}/actions/${action}`, {
         method: "POST",
@@ -1909,10 +1915,20 @@ export default function App() {
                         <a href={app.healthUrl} target="_blank" rel="noreferrer">Health</a>
                         {canManageOrg && app.capabilities.some((capability) => ["deploy", "redeploy", "rollback"].includes(capability)) && (
                           <div className="live-control">
-                            <input placeholder="Action reason" value={appActionReasons[app.id] ?? ""} onChange={(event) => setAppActionReasons({ ...appActionReasons, [app.id]: event.target.value })} />
+                            <input
+                              required
+                              placeholder="Action reason"
+                              value={appActionReasons[app.id] ?? ""}
+                              onChange={(event) => {
+                                setAppActionReasons({ ...appActionReasons, [app.id]: event.target.value });
+                                setAppActionErrors((current) => ({ ...current, [app.id]: "" }));
+                              }}
+                            />
+                            <p className="form-help action-help">Reason is required for deploy, redeploy, and rollback audit history.</p>
+                            {appActionErrors[app.id] ? <p className="inline-error">{appActionErrors[app.id]}</p> : null}
                             <div className="actions">
-                              {app.capabilities.includes("deploy") && <button onClick={() => dispatchLiveAppAction(app, "deploy")} disabled={busy}>Deploy</button>}
-                              {app.capabilities.includes("redeploy") && <button onClick={() => dispatchLiveAppAction(app, "redeploy")} disabled={busy}>Redeploy</button>}
+                              {app.capabilities.includes("deploy") && <button onClick={() => dispatchLiveAppAction(app, "deploy")} disabled={busy || !(appActionReasons[app.id] ?? "").trim()}>Deploy</button>}
+                              {app.capabilities.includes("redeploy") && <button onClick={() => dispatchLiveAppAction(app, "redeploy")} disabled={busy || !(appActionReasons[app.id] ?? "").trim()}>Redeploy</button>}
                               {app.capabilities.includes("rollback") && <button onClick={() => loadAppDeployments(app)} disabled={busy}>History</button>}
                             </div>
                             {app.capabilities.includes("rollback") && liveAppDeployments[app.id]?.length ? (
@@ -1924,7 +1940,7 @@ export default function App() {
                                     </option>
                                   ))}
                                 </select>
-                                <button onClick={() => dispatchLiveAppAction(app, "rollback")} disabled={busy || !rollbackTargets[app.id]}>Rollback</button>
+                                <button onClick={() => dispatchLiveAppAction(app, "rollback")} disabled={busy || !rollbackTargets[app.id] || !(appActionReasons[app.id] ?? "").trim()}>Rollback</button>
                               </div>
                             ) : null}
                             {latestDispatch ? (
