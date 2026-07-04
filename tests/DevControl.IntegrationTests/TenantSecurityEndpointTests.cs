@@ -91,6 +91,51 @@ public sealed partial class TenantSecurityEndpointTests
     }
 
     [Fact]
+    public async Task SignedInInvitee_CanListAndAcceptPendingInvitationWithoutEmailToken()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        await using var factory = new DevControlStage2Factory(connectionString);
+        await factory.ResetDatabaseAsync();
+        using var ownerClient = await factory.CreateAuthenticatedClientAsync("owner@example.com");
+        var organization = await CreateOrganizationAsync(ownerClient, "Invite Inbox Org");
+
+        _ = await PostJsonAsync<InvitationDto>(
+            ownerClient,
+            $"/api/organizations/{organization.Id}/invitations",
+            new { email = "invitee@example.com", role = "Developer" });
+
+        using var inviteeClient = await factory.CreateAuthenticatedClientAsync("invitee@example.com");
+        var pending = await inviteeClient.GetFromJsonAsync<List<PendingInvitationDto>>("/api/invitations");
+        var invitation = Assert.Single(pending!);
+        Assert.Equal(organization.Id, invitation.OrganizationId);
+        Assert.Equal("Invite Inbox Org", invitation.OrganizationName);
+        Assert.Equal("Developer", invitation.Role);
+
+        using var outsiderClient = await factory.CreateAuthenticatedClientAsync("outsider@example.com");
+        var outsiderPending = await outsiderClient.GetFromJsonAsync<List<PendingInvitationDto>>("/api/invitations");
+        Assert.Empty(outsiderPending!);
+
+        var outsiderAccept = await PostJsonRawAsync(outsiderClient, $"/api/invitations/{invitation.Id}/accept", new { });
+        Assert.Equal(HttpStatusCode.NotFound, outsiderAccept.StatusCode);
+
+        var acceptResponse = await PostJsonRawAsync(inviteeClient, $"/api/invitations/{invitation.Id}/accept", new { });
+        Assert.Equal(HttpStatusCode.OK, acceptResponse.StatusCode);
+
+        var me = await inviteeClient.GetFromJsonAsync<MeDto>("/api/auth/me");
+        var membership = Assert.Single(me!.Organizations);
+        Assert.Equal(organization.Id, membership.Id);
+        Assert.Equal("Developer", membership.Role);
+
+        pending = await inviteeClient.GetFromJsonAsync<List<PendingInvitationDto>>("/api/invitations");
+        Assert.Empty(pending!);
+    }
+
+    [Fact]
     public async Task Invitations_CanBeResentRevoked_AndRejectMismatchedEmail()
     {
         var connectionString = Environment.GetEnvironmentVariable("DEVCONTROL_TEST_CONNECTION_STRING");
@@ -320,6 +365,8 @@ public sealed partial class TenantSecurityEndpointTests
     private sealed record EnvironmentDto(Guid Id, string ProjectId, string Name, string Slug);
 
     private sealed record InvitationDto(Guid Id, string Email, string Role, string Status);
+
+    private sealed record PendingInvitationDto(Guid Id, Guid OrganizationId, string OrganizationName, string OrganizationSlug, string Email, string Role);
 
     private sealed record MemberDto(Guid Id, Guid UserId, string Email, string DisplayName, string Role);
 

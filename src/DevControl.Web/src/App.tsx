@@ -59,6 +59,17 @@ type Invitation = {
   revokedAt?: string;
 };
 
+type PendingInvitation = {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  email: string;
+  role: Role;
+  expiresAt: string;
+  lastSentAt: string;
+};
+
 type AuditLog = {
   id: string;
   actorEmail: string;
@@ -615,6 +626,7 @@ export default function App() {
   const [environments, setEnvironments] = useState<EnvironmentItem[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [controlActions, setControlActions] = useState<ControlAction[]>([]);
   const [liveApps, setLiveApps] = useState<LiveApp[]>([]);
@@ -911,6 +923,11 @@ export default function App() {
     setSelectedEnvironmentId(nextEnvironmentId);
   }
 
+  async function refreshPendingInvitations() {
+    const payload = await api<PendingInvitation[]>("/api/invitations");
+    setPendingInvitations(payload);
+  }
+
   async function refreshFeatureFlags(organizationId: string, projectId: string, environmentId: string) {
     if (!organizationId || !projectId || !environmentId) {
       setFeatureFlags([]);
@@ -1009,6 +1026,16 @@ export default function App() {
       });
     }
   }, [authenticated, selectedOrgId, me?.organizations]);
+
+  useEffect(() => {
+    if (authenticated) {
+      void refreshPendingInvitations().catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : "Failed to load pending invitations.");
+      });
+    } else {
+      setPendingInvitations([]);
+    }
+  }, [authenticated, me?.user.email]);
 
   useEffect(() => {
     if (!authenticated || !selectedOrgId || !canReadControlActions || activeGitHubWorkflowDispatchCount === 0) {
@@ -1600,7 +1627,7 @@ export default function App() {
       });
       setInviteForm({ email: "", role: "Developer" });
       await refreshOrgData(selectedOrgId);
-      setNotice("Invitation sent.");
+      setNotice("Invitation created. The invitee can accept it from DevControl after signing in with that email.");
     });
   }
 
@@ -1648,7 +1675,16 @@ export default function App() {
     await runMutation(async () => {
       await api(`/api/organizations/${selectedOrgId}/invitations/${invitation.id}/resend`, { method: "POST" });
       await refreshOrgData(selectedOrgId);
-      setNotice("Invitation resent.");
+      setNotice("Invitation updated. The invitee can accept it from DevControl after signing in with that email.");
+    });
+  }
+
+  async function acceptPendingInvitation(invitation: PendingInvitation) {
+    await runMutation(async () => {
+      await api(`/api/invitations/${invitation.id}/accept`, { method: "POST" });
+      await refreshPendingInvitations();
+      await loadMe(invitation.organizationId);
+      setNotice(`Invitation to ${invitation.organizationName} accepted.`);
     });
   }
 
@@ -1801,6 +1837,29 @@ export default function App() {
         <section className="invite-accept">
           <strong>Pending invitation</strong>
           <button className="primary" onClick={acceptInvitation} disabled={busy}>Accept</button>
+        </section>
+      )}
+
+      {pendingInvitations.length > 0 && (
+        <section className="panel pending-invitations">
+          <div className="panel-heading">
+            <h2>Pending invitations</h2>
+            <span>{pendingInvitations.length}</span>
+          </div>
+          <div className="stack">
+            {pendingInvitations.map((invitation) => (
+              <div className="list-item" key={invitation.id}>
+                <div>
+                  <strong>{invitation.organizationName}</strong>
+                  <span>{invitation.role} / {invitation.email}</span>
+                  <span>Expires {formatDate(invitation.expiresAt)}</span>
+                </div>
+                <div className="actions">
+                  <button className="primary" onClick={() => acceptPendingInvitation(invitation)} disabled={busy}>Accept</button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

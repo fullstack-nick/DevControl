@@ -24,11 +24,14 @@ public static class TenantEndpoints
         api.MapPatch("/organizations/{organizationId:guid}/members/{memberId:guid}", UpdateMemberAsync).RequireCsrf();
         api.MapDelete("/organizations/{organizationId:guid}/members/{memberId:guid}", RemoveMemberAsync).RequireCsrf();
 
+        api.MapGet("/invitations", ListMyInvitationsAsync);
+        api.MapPost("/invitations/{invitationId:guid}/accept", AcceptInvitationByIdAsync).RequireCsrf();
+        api.MapPost("/invitations/{token}/accept", AcceptInvitationAsync).RequireCsrf();
+
         api.MapGet("/organizations/{organizationId:guid}/invitations", ListInvitationsAsync);
         api.MapPost("/organizations/{organizationId:guid}/invitations", CreateInvitationAsync).RequireCsrf();
         api.MapPost("/organizations/{organizationId:guid}/invitations/{invitationId:guid}/revoke", RevokeInvitationAsync).RequireCsrf();
         api.MapPost("/organizations/{organizationId:guid}/invitations/{invitationId:guid}/resend", ResendInvitationAsync).RequireCsrf();
-        api.MapPost("/invitations/{token}/accept", AcceptInvitationAsync).RequireCsrf();
 
         api.MapGet("/organizations/{organizationId:guid}/projects", ListProjectsAsync);
         api.MapPost("/organizations/{organizationId:guid}/projects", CreateProjectAsync).RequireCsrf();
@@ -395,6 +398,40 @@ public static class TenantEndpoints
         return Results.Ok(invitations);
     }
 
+    private static async Task<IResult> ListMyInvitationsAsync(
+        CurrentUserAccessor currentUserAccessor,
+        DevControlDbContext dbContext,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        var actor = await currentUserAccessor.GetOrCreateAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        var invitations = await dbContext.OrganizationInvitations
+            .Where(invitation =>
+                invitation.NormalizedEmail == actor.NormalizedEmail &&
+                invitation.Status == InvitationStatus.Pending &&
+                invitation.ExpiresAt > now)
+            .Join(
+                dbContext.Organizations,
+                invitation => invitation.OrganizationId,
+                organization => organization.Id,
+                (invitation, organization) => new { invitation, organization })
+            .OrderByDescending(candidate => candidate.invitation.LastSentAt)
+            .Take(25)
+            .Select(candidate => new PendingInvitationResponse(
+                candidate.invitation.Id,
+                candidate.organization.Id,
+                candidate.organization.Name,
+                candidate.organization.Slug,
+                candidate.invitation.Email,
+                candidate.invitation.Role.ToString(),
+                candidate.invitation.ExpiresAt,
+                candidate.invitation.LastSentAt))
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(invitations);
+    }
+
     private static async Task<IResult> CreateInvitationAsync(
         Guid organizationId,
         InvitationCreateRequest request,
@@ -618,6 +655,28 @@ public static class TenantEndpoints
         return Results.Ok(ToInvitationResponse(invitation));
     }
 
+    private static async Task<IResult> AcceptInvitationByIdAsync(
+        Guid invitationId,
+        CurrentUserAccessor currentUserAccessor,
+        DevControlDbContext dbContext,
+        AuditLogWriter auditLogWriter,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        var actor = await currentUserAccessor.GetOrCreateAsync(cancellationToken);
+        var invitation = await dbContext.OrganizationInvitations
+            .SingleOrDefaultAsync(candidate =>
+                candidate.Id == invitationId &&
+                candidate.NormalizedEmail == actor.NormalizedEmail,
+                cancellationToken);
+        if (invitation is null)
+        {
+            return Results.NotFound();
+        }
+
+        return await AcceptInvitationCoreAsync(invitation, actor, dbContext, auditLogWriter, timeProvider, cancellationToken);
+    }
+
     private static async Task<IResult> AcceptInvitationAsync(
         string token,
         CurrentUserAccessor currentUserAccessor,
@@ -636,6 +695,17 @@ public static class TenantEndpoints
             return Results.NotFound();
         }
 
+        return await AcceptInvitationCoreAsync(invitation, actor, dbContext, auditLogWriter, timeProvider, cancellationToken);
+    }
+
+    private static async Task<IResult> AcceptInvitationCoreAsync(
+        OrganizationInvitation invitation,
+        CurrentUser actor,
+        DevControlDbContext dbContext,
+        AuditLogWriter auditLogWriter,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
         var now = timeProvider.GetUtcNow();
         if (invitation.Status != InvitationStatus.Pending)
         {
@@ -1316,6 +1386,16 @@ public sealed record InvitationResponse(
     DateTimeOffset LastSentAt,
     DateTimeOffset? AcceptedAt,
     DateTimeOffset? RevokedAt);
+
+public sealed record PendingInvitationResponse(
+    Guid Id,
+    Guid OrganizationId,
+    string OrganizationName,
+    string OrganizationSlug,
+    string Email,
+    string Role,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset LastSentAt);
 
 public sealed record ProjectUpsertRequest(string? Name, string? Slug, string? Description);
 

@@ -245,6 +245,10 @@ label {
   grid-column: 1 / -1;
 }
 
+.pending-invitations {
+  margin-top: 18px;
+}
+
 .panel-heading {
   justify-content: space-between;
   gap: 12px;
