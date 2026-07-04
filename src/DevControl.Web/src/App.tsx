@@ -794,6 +794,8 @@ export default function App() {
   const selectedWebhookEndpoint = webhookEndpoints.find((endpoint) => endpoint.id === selectedWebhookEndpointId);
   const selectedMonitor = monitors.find((monitor) => monitor.id === selectedMonitorId);
   const selectedIncident = incidents.find((incident) => incident.id === selectedIncidentId);
+  const selectedProjectBelongsToOrg = selectedProject?.organizationId === selectedOrgId;
+  const selectedEnvironmentBelongsToProject = selectedEnvironment?.projectId === selectedProjectId;
   const canManageMonitors = roleAtLeast(selectedOrg?.role, selectedEnvironmentIsProduction ? "Admin" : "Developer");
   const canManageIncidents = roleAtLeast(selectedOrg?.role, "Developer");
   const canPublishReleases = roleAtLeast(selectedOrg?.role, "Admin");
@@ -809,7 +811,22 @@ export default function App() {
         selectedOrgId ??
         payload.organizations[0]?.id ??
         "";
-      setSelectedOrgId(payload.organizations.some((organization) => organization.id === nextOrgId) ? nextOrgId : payload.organizations[0]?.id ?? "");
+      const resolvedOrgId = payload.organizations.some((organization) => organization.id === nextOrgId) ? nextOrgId : payload.organizations[0]?.id ?? "";
+      if (resolvedOrgId !== selectedOrgId) {
+        setSelectedProjectId("");
+        setSelectedEnvironmentId("");
+        setEnvironments([]);
+        setFeatureFlags([]);
+        setFeatureFlagChanges([]);
+        setHistoryFlagId("");
+        setSelectedWebhookEndpointId("");
+        setWebhookDeliveries([]);
+        setSelectedMonitorId("");
+        setMonitorChecks([]);
+        setSelectedIncidentId("");
+        setIncidentUpdates([]);
+      }
+      setSelectedOrgId(resolvedOrgId);
     } catch (loadError) {
       if (loadError instanceof AuthError) {
         setAuthenticated(false);
@@ -1057,17 +1074,17 @@ export default function App() {
   }, [authenticated, selectedOrgId, canReadControlActions, activeGitHubWorkflowDispatchCount]);
 
   useEffect(() => {
-    if (authenticated && selectedOrgId && selectedProjectId) {
+    if (authenticated && selectedOrgId && selectedProjectId && selectedProjectBelongsToOrg) {
       void refreshEnvironments(selectedOrgId, selectedProjectId).catch((refreshError: unknown) => {
         setError(refreshError instanceof Error ? refreshError.message : "Failed to load environments.");
       });
     } else {
       setEnvironments([]);
     }
-  }, [authenticated, selectedOrgId, selectedProjectId]);
+  }, [authenticated, selectedOrgId, selectedProjectId, selectedProjectBelongsToOrg]);
 
   useEffect(() => {
-    if (authenticated && selectedOrgId && selectedProjectId && selectedEnvironmentId) {
+    if (authenticated && selectedOrgId && selectedProjectId && selectedEnvironmentId && selectedProjectBelongsToOrg && selectedEnvironmentBelongsToProject) {
       void refreshFeatureFlags(selectedOrgId, selectedProjectId, selectedEnvironmentId).catch((refreshError: unknown) => {
         setError(refreshError instanceof Error ? refreshError.message : "Failed to load feature flags.");
       });
@@ -1076,37 +1093,37 @@ export default function App() {
       setFeatureFlagChanges([]);
       setHistoryFlagId("");
     }
-  }, [authenticated, selectedOrgId, selectedProjectId, selectedEnvironmentId]);
+  }, [authenticated, selectedOrgId, selectedProjectId, selectedEnvironmentId, selectedProjectBelongsToOrg, selectedEnvironmentBelongsToProject]);
 
   useEffect(() => {
-    if (authenticated && selectedOrgId && selectedWebhookEndpointId) {
+    if (authenticated && selectedOrgId && selectedProjectBelongsToOrg && selectedWebhookEndpoint) {
       void loadWebhookDeliveries(selectedWebhookEndpointId).catch((refreshError: unknown) => {
         setError(refreshError instanceof Error ? refreshError.message : "Failed to load webhook deliveries.");
       });
     } else {
       setWebhookDeliveries([]);
     }
-  }, [authenticated, selectedOrgId, selectedWebhookEndpointId]);
+  }, [authenticated, selectedOrgId, selectedProjectBelongsToOrg, selectedWebhookEndpointId]);
 
   useEffect(() => {
-    if (authenticated && selectedOrgId && selectedMonitor) {
+    if (authenticated && selectedOrgId && selectedProjectBelongsToOrg && selectedMonitor) {
       void loadMonitorChecks(selectedMonitor).catch((refreshError: unknown) => {
         setError(refreshError instanceof Error ? refreshError.message : "Failed to load monitor checks.");
       });
     } else {
       setMonitorChecks([]);
     }
-  }, [authenticated, selectedOrgId, selectedMonitorId]);
+  }, [authenticated, selectedOrgId, selectedProjectBelongsToOrg, selectedMonitorId]);
 
   useEffect(() => {
-    if (authenticated && selectedOrgId && selectedIncidentId) {
+    if (authenticated && selectedOrgId && selectedProjectBelongsToOrg && selectedIncident) {
       void loadIncidentUpdates(selectedIncidentId).catch((refreshError: unknown) => {
         setError(refreshError instanceof Error ? refreshError.message : "Failed to load incident updates.");
       });
     } else {
       setIncidentUpdates([]);
     }
-  }, [authenticated, selectedOrgId, selectedIncidentId]);
+  }, [authenticated, selectedOrgId, selectedProjectBelongsToOrg, selectedIncidentId]);
 
   async function runMutation(action: () => Promise<void>) {
     setBusy(true);
